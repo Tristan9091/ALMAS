@@ -1,0 +1,20 @@
+---
+import Layout from '../layouts/Layout.astro'
+import RegisterForm from '../components/react/RegisterForm.jsx'
+---
+
+<Layout title="Crear cuenta | ALMĀS">
+
+    <main class="auth-page">
+        <RegisterForm client:load />
+    </main>
+
+</Layout>
+
+<style>
+    .auth-page {
+        max-width: 450px;
+        margin: 4rem auto;
+        padding: 2rem;
+    }
+</style>

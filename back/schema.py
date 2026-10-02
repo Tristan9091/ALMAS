@@ -3,12 +3,21 @@ from typing import List, Optional
 from datetime import datetime
 from sqlmodel import Session, select
 from database import engine
+from strawberry.types import Info
+from auth import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    decode_access_token,
+    get_token_from_header
+)
 from models import (
     Producto as ProductoDB,
     Categoria as CategoriaDB,
     Variante as VarianteDB,
     Pedido as PedidoDB,
     DetallePedido as DetallePedidoDB,
+    Usuario as UsuarioDB,
 )
 
 
@@ -114,6 +123,19 @@ class Query:
                 for p in peds
             ]
 
+    @strawberry.field
+    def me(
+        self,
+        info: Info
+    ) -> "UsuarioType":
+
+        usuario = obtener_usuario_actual(info)
+
+        return UsuarioType(
+        id=usuario.id,
+        nombre=usuario.nombre,
+        email=usuario.email
+        )
 
 @strawberry.input
 class ProductoInput:
@@ -147,6 +169,80 @@ class PedidoType:
     nombre_comprador: str
     estatus: str
     total: float
+
+@strawberry.input
+class RegistroInput:
+    nombre: str
+    email: str
+    password: str
+
+@strawberry.input
+class LoginInput:
+    email: str
+    password: str
+
+@strawberry.type
+class UsuarioType:
+    id: int
+    nombre: str
+    email: str
+
+@strawberry.type
+class AuthPayload:
+    token: str
+    usuario: UsuarioType
+
+def obtener_usuario_actual(
+    info: Info
+) -> UsuarioDB:
+
+    request = info.context["request"]
+
+    authorization = request.headers.get(
+        "Authorization"
+    )
+
+    token = get_token_from_header(
+        authorization
+    )
+
+    if not token:
+        raise ValueError(
+            "No autenticado."
+        )
+
+    payload = decode_access_token(token)
+
+    if not payload:
+        raise ValueError(
+            "Token inválido o expirado."
+        )
+
+    user_id = payload.get("sub")
+
+    if not user_id:
+        raise ValueError(
+            "Token inválido."
+        )
+
+    with Session(engine) as session:
+
+        usuario = session.get(
+            UsuarioDB,
+            int(user_id)
+        )
+
+        if not usuario:
+            raise ValueError(
+                "Usuario no encontrado."
+            )
+
+        if not usuario.activo:
+            raise ValueError(
+                "Usuario inactivo."
+            )
+
+        return usuario
 
 
 @strawberry.type
@@ -183,7 +279,8 @@ class Mutation:
             return True
 
     @strawberry.mutation
-    def crear_pedido(self, data: PedidoInput) -> PedidoType:
+    def crear_pedido(self, info: Info, data: PedidoInput) -> PedidoType:
+        usuario = obtener_usuario_actual(info)
         with Session(engine) as session:
             total = sum(d.cantidad * d.precio_unitario for d in data.detalles)
 
@@ -193,6 +290,7 @@ class Mutation:
                 direccion_envio=data.direccion_envio,
                 estatus="pendiente",
                 total=total,
+                usuario_id=usuario.id,
             )
             session.add(pedido)
             session.commit()
@@ -221,6 +319,93 @@ class Mutation:
                 estatus=pedido.estatus,
                 total=pedido.total,
             )
+
+    @strawberry.mutation
+    def registrar_usuario(
+        self,
+        data: RegistroInput
+        ) -> UsuarioType:
+
+        with Session(engine) as session:
+
+            usuario_existente = session.exec(
+                select(UsuarioDB).where(
+                    UsuarioDB.email == data.email
+                )
+            ).first()
+
+        if usuario_existente:
+            raise ValueError(
+                "Ya existe un usuario con ese correo."
+            )
+
+        usuario = UsuarioDB(
+            nombre=data.nombre,
+            email=data.email,
+            password_hash=hash_password(
+                data.password
+            )
+        )
+
+        session.add(usuario)
+        session.commit()
+        session.refresh(usuario)
+
+        return UsuarioType(
+            id=usuario.id,
+            nombre=usuario.nombre,
+            email=usuario.email
+        )
+
+    @strawberry.mutation
+    def login(
+        self,
+        data: LoginInput
+    ) -> AuthPayload:
+
+        with Session(engine) as session:
+            usuario = session.exec(
+            select(UsuarioDB).where(
+                UsuarioDB.email == data.email
+            )
+        ).first()
+
+        if not usuario:
+            raise ValueError(
+                "Correo o contraseña incorrectos."
+            )
+
+        if not usuario.password_hash:
+            raise ValueError(
+                "Correo o contraseña incorrectos."
+            )
+
+        if not verify_password(
+            data.password,
+            usuario.password_hash
+        ):
+            raise ValueError(
+                "Correo o contraseña incorrectos."
+            )
+
+        if not usuario.activo:
+            raise ValueError(
+                "Usuario inactivo."
+            )
+
+        token = create_access_token(
+            user_id=usuario.id,
+            email=usuario.email
+        )
+
+        return AuthPayload(
+            token=token,
+            usuario=UsuarioType(
+                id=usuario.id,
+                nombre=usuario.nombre,
+                email=usuario.email
+            )
+        )
 
 
 schema = strawberry.Schema(query=Query, mutation=Mutation)

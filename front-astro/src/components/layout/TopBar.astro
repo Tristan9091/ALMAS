@@ -1,6 +1,7 @@
 ---
 import CartButton from '../react/CartButton.jsx'
 import SearchBar from '../react/SearchBar.jsx'
+import AuthStatus from '../react/AuthStatus.jsx'
 ---
 <header>
     <a class="logo" href="/">
@@ -9,7 +10,10 @@ import SearchBar from '../react/SearchBar.jsx'
 
     <SearchBar client:load />
 
-    <CartButton client:load />
+    <div class="header-actions">
+        <AuthStatus client:load />
+        <CartButton client:load />
+    </div>
 </header>
 
 <style>
@@ -63,4 +67,10 @@ import SearchBar from '../react/SearchBar.jsx'
         font-size: 1.3rem;
         text-decoration: none;
     }
+
+    .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
 </style>

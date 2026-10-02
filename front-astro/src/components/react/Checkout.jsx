@@ -1,7 +1,6 @@
-import { useState } from "react";
-
+import { useEffect, useState } from "react";
 import { useCartStore } from "../../store/useCartStore";
-import { graphqlRequest } from "../../graphql/client";
+import { graphqlAuthRequest } from "../../graphql/client";
 
 import "../../styles/checkout.css";
 
@@ -18,10 +17,38 @@ export default function Checkout() {
   const [error, setError] = useState(null);
   const [pedido, setPedido] = useState(null);
 
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
   const total = cart.reduce(
     (sum, item) => sum + item.precio * item.cantidad,
     0,
   );
+
+  useEffect(() => {
+    const verificarSesion = async () => {
+      const token = localStorage.getItem("almas-token");
+
+      if (!token) {
+        window.location.href = "/login";
+        return;
+      }
+
+      try {
+        await graphqlAuthRequest(ME_QUERY);
+
+        setCheckingAuth(false);
+      } catch (err) {
+        console.error(err);
+
+        localStorage.removeItem("almas-token");
+        localStorage.removeItem("almas-user");
+
+        window.location.href = "/login";
+      }
+    };
+
+    verificarSesion();
+  }, []);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -30,7 +57,7 @@ export default function Checkout() {
     setError(null);
 
     try {
-      const data = await graphqlRequest(CREAR_PEDIDO, {
+      const data = await graphqlAuthRequest(CREAR_PEDIDO, {
         data: {
           nombreComprador: nombre,
           emailComprador: email,
@@ -56,6 +83,10 @@ export default function Checkout() {
       setLoading(false);
     }
   };
+
+  if (checkingAuth) {
+    return <p>Comprobando sesión...</p>;
+  }
 
   if (pedido) {
     return (
@@ -128,7 +159,7 @@ export default function Checkout() {
         <h2>Resumen</h2>
 
         {cart.map((item) => (
-          <div className="summary-item" key={item.id}>
+          <div className="summary-item" key={item.cartKey}>
             <span>
               {item.nombre} × {item.cantidad}
             </span>
@@ -158,4 +189,14 @@ const CREAR_PEDIDO = `
         }
 
     }
+`;
+
+const ME_QUERY = `
+  query {
+    me {
+      id
+      nombre
+      email
+    }
+  }
 `;

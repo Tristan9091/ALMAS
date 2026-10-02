@@ -45,14 +45,6 @@ class Pedido(SQLModel, table=True):
     usuario: Optional["Usuario"] = Relationship(back_populates="pedidos")  # ← agrega esta línea
     detalles: List["DetallePedido"] = Relationship(back_populates="pedido")
 
-class Usuario(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    nombre: str
-    email: str
-
-    pedidos: List["Pedido"] = Relationship(back_populates="usuario")
-
-
 class DetallePedido(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     cantidad: int
@@ -62,3 +54,14 @@ class DetallePedido(SQLModel, table=True):
     variante_id: Optional[int] = Field(default=None, foreign_key="variante.id")
 
     pedido: Optional[Pedido] = Relationship(back_populates="detalles")
+
+class Usuario(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    nombre: str
+    email: str = Field(index=True, unique=True)
+    password_hash: str
+
+    activo: bool = True
+
+    pedidos: List["Pedido"] = Relationship(back_populates="usuario")
