@@ -1,0 +1,33 @@
+:root {
+  --color-bg: #ffffff;
+  --color-purple: #8f1268;
+  --color-text: #3e084e;
+  --color-accent: #1f6e43;
+  --color-gold: #c9a24b;
+
+  --font-heading: "Arial Black", sans-serif;
+  --font-script: "Brush Script MT", cursive;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-height: 100vh;
+
+  background-color: var(--color-bg);
+  color: var(--color-text);
+
+  font-family: system-ui, sans-serif;
+}
+
+input::placeholder {
+  color: rgb(252, 251, 250);
+}

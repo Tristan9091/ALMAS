@@ -1,0 +1,80 @@
+---
+interface Props {
+    id: number
+    nombre: string
+    precio: number
+    imagenUrl?: string | null
+}
+
+const {
+    id,
+    nombre,
+    precio,
+    imagenUrl
+} = Astro.props
+---
+
+<a
+    class="product-card"
+    href={`/producto/${id}`}
+>
+    <img
+        src={
+            imagenUrl ||
+            'https://placehold.co/400x400?text=ALMAS'
+        }
+        alt={nombre}
+    />
+
+    <div class="product-info">
+        <h3>{nombre}</h3>
+
+        <p>
+            ${precio.toLocaleString('es-MX')}
+        </p>
+    </div>
+</a>
+
+<style>
+    .product-card {
+        display: block;
+
+        text-decoration: none;
+        color: inherit;
+
+        border-radius: 12px;
+        overflow: hidden;
+
+        border: 1px solid rgba(201, 162, 75, 0.3);
+
+        transition:
+            transform 0.2s ease,
+            box-shadow 0.2s ease;
+    }
+
+    .product-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+    }
+
+    img {
+        width: 100%;
+        aspect-ratio: 1;
+        object-fit: cover;
+        display: block;
+    }
+
+    .product-info {
+        padding: 1rem;
+    }
+
+    h3 {
+        margin: 0 0 0.5rem;
+    }
+
+    p {
+        margin: 0;
+        color: var(--color-purple);
+        font-weight: bold;
+    }
+</style>

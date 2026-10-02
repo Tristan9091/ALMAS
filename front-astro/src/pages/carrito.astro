@@ -1,0 +1,29 @@
+---
+import Layout from '../layouts/Layout.astro'
+import Cart from '../components/react/Cart.jsx'
+---
+
+<Layout title="Carrito | ALMĀS">
+
+    <main>
+        <h1>Tu carrito</h1>
+
+        <Cart client:load />
+    </main>
+
+</Layout>
+
+<style>
+    main {
+        max-width: 1000px;
+        min-height: 80vh;
+
+        margin: 0 auto;
+        padding: 2rem;
+    }
+
+    h1 {
+        font-family: var(--font-heading);
+        color: var(--color-purple);
+    }
+</style>

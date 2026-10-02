@@ -1,0 +1,59 @@
+<section class="hero">
+    <h1>ALMĀS</h1>
+
+    <p class="hero-logo">
+        aljawahiriu
+    </p>
+
+    <p class="hero-phrase">
+        you can't buy happiness but you can buy jewellery and that's pretty close
+    </p>
+</section>
+
+<style>
+    .hero {
+        position: relative;
+        width: 100%;
+        height: 100vh;
+
+        background-image:
+            linear-gradient(
+                rgba(143, 18, 104, 0.55),
+                rgba(143, 18, 104, 0.75)
+            ),
+            url("https://st.depositphotos.com/3006519/4596/i/450/depositphotos_45960435-stock-photo-gold-jewelry.jpg");
+
+        background-size: cover;
+        background-position: center;
+
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+
+        text-align: center;
+        color: var(--color-text);
+    }
+
+    h1 {
+        font-family: var(--font-heading);
+        font-size: 5rem;
+        margin: 0;
+        letter-spacing: 2px;
+        color: #fff;
+    }
+
+    .hero-logo {
+        font-family: var(--font-script);
+        color: var(--color-accent);
+        font-size: 2rem;
+        margin: 0.25rem 0;
+    }
+
+    .hero-phrase {
+        font-style: italic;
+        max-width: 500px;
+        opacity: 0.9;
+        color: #fff;
+    }
+</style>

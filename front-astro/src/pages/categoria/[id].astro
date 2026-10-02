@@ -1,0 +1,191 @@
+---
+export const prerender = false
+
+import Layout from '../../layouts/Layout.astro'
+import Sidebar from '../../components/layout/Sidebar.astro'
+import ProductCard from '../../components/ProductCard.astro'
+
+import { graphqlRequest } from '../../graphql/client'
+
+interface Categoria {
+    id: number
+    nombre: string
+    imagenUrl?: string | null
+}
+
+interface Producto {
+    id: number
+    nombre: string
+    precio: number
+    imagenUrl?: string | null
+}
+
+interface CategoriaDetalle {
+    id: number
+    nombre: string
+    productos: Producto[]
+}
+
+interface CategoriaData {
+    categoria: CategoriaDetalle | null
+    categorias: Categoria[]
+}
+
+const QUERY_CATEGORIA = `
+    query Categoria($id: Int!) {
+
+        categoria(id: $id) {
+            id
+            nombre
+
+            productos {
+                id
+                nombre
+                precio
+                imagenUrl
+            }
+        }
+
+        categorias {
+            id
+            nombre
+            imagenUrl
+        }
+    }
+`
+
+
+const { id } = Astro.params
+
+const categoryId = Number(id)
+
+let categoria: CategoriaDetalle | null = null
+let categorias: Categoria[] = []
+let error: string | null = null
+
+try {
+
+    const data = await graphqlRequest<CategoriaData>(
+        QUERY_CATEGORIA,
+        {
+            id: categoryId
+        }
+    )
+
+    categoria = data.categoria
+    categorias = data.categorias
+
+} catch (err) {
+
+    console.error(err)
+    error = 'No se pudo cargar la categoría.'
+
+}
+---
+
+
+<Layout
+    title={
+        categoria
+            ? `${categoria.nombre} | ALMĀS`
+            : 'Categoría | ALMĀS'
+    }
+>
+
+    <div class="content">
+
+        <Sidebar categorias={categorias} />
+
+        <main>
+
+            {
+                error ? (
+
+                    <p class="error">
+                        {error}
+                    </p>
+
+                ) : !categoria ? (
+
+                    <p>
+                        Categoría no encontrada.
+                    </p>
+
+                ) : (
+
+                    <>
+                        <h1>{categoria.nombre}</h1>
+
+                        {
+                            categoria.productos.length === 0 ? (
+
+                                <p>
+                                    No hay productos en esta categoría.
+                                </p>
+
+                            ) : (
+
+                                <div class="products">
+
+                                    {
+                                        categoria.productos.map(
+                                            (producto) => (
+
+                                                <ProductCard
+                                                    id={producto.id}
+                                                    nombre={producto.nombre}
+                                                    precio={producto.precio}
+                                                    imagenUrl={producto.imagenUrl}
+                                                />
+
+                                            )
+                                        )
+                                    }
+
+                                </div>
+
+                            )
+                        }
+                    </>
+
+                )
+            }
+
+        </main>
+
+    </div>
+
+</Layout>
+
+<style>
+    .content {
+        display: flex;
+    }
+
+    main {
+        flex: 1;
+        min-height: 80vh;
+        padding: 2rem;
+    }
+
+    h1 {
+        font-family: var(--font-heading);
+        color: var(--color-purple);
+        margin-top: 0;
+    }
+
+    .products {
+        display: grid;
+
+        grid-template-columns:
+            repeat(auto-fill, minmax(200px, 1fr));
+
+        gap: 1.5rem;
+    }
+
+    .error {
+        color: #a00;
+    }
+</style>
+
+

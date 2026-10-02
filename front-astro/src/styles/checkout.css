@@ -1,0 +1,91 @@
+.checkout {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+
+  gap: 3rem;
+}
+
+.checkout form {
+  display: flex;
+  flex-direction: column;
+
+  gap: 1.2rem;
+}
+
+.checkout label {
+  display: flex;
+  flex-direction: column;
+
+  gap: 0.4rem;
+
+  font-weight: 600;
+}
+
+.checkout input,
+.checkout textarea {
+  padding: 0.8rem;
+
+  border: 1px solid #ccc;
+  border-radius: 8px;
+
+  font: inherit;
+}
+
+.checkout textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+.checkout form button {
+  padding: 0.8rem 1.5rem;
+
+  border: none;
+  border-radius: 999px;
+
+  background: #8f1268;
+  color: white;
+
+  cursor: pointer;
+}
+
+.checkout form button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.order-summary {
+  padding: 1.5rem;
+
+  border: 1px solid rgba(201, 162, 75, 0.4);
+  border-radius: 12px;
+
+  align-self: start;
+}
+
+.summary-item {
+  display: flex;
+  justify-content: space-between;
+
+  gap: 1rem;
+
+  margin: 0.8rem 0;
+}
+
+.error {
+  color: #a00;
+}
+
+.success {
+  padding: 2rem;
+
+  border: 1px solid rgba(201, 162, 75, 0.4);
+  border-radius: 12px;
+
+  text-align: center;
+}
+
+@media (max-width: 700px) {
+  .checkout {
+    grid-template-columns: 1fr;
+  }
+}

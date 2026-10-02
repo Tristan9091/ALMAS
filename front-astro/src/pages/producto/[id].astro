@@ -1,0 +1,276 @@
+---
+export const prerender = false
+
+import Layout from '../../layouts/Layout.astro'
+import Sidebar from '../../components/layout/Sidebar.astro'
+import AddToCart from '../../components/react/AddToCart.jsx'
+
+import { graphqlRequest } from '../../graphql/client'
+
+interface Categoria {
+    id: number
+    nombre: string
+    imagenUrl?: string | null
+}
+
+interface Variante {
+    id: number
+    tipo: string
+    valor: string
+}
+
+interface Producto {
+    id: number
+    nombre: string
+    descripcion?: string | null
+    precio: number
+    imagenUrl?: string | null
+    stock: number
+    variantes: Variante[]
+}
+
+interface ProductoData {
+    product: Producto | null
+    categorias: Categoria[]
+}
+
+const QUERY_PRODUCTO = `
+    query Producto($id: Int!) {
+
+        product(id: $id) {
+            id
+            nombre
+            descripcion
+            precio
+            imagenUrl
+            stock
+
+            variantes {
+                id
+                tipo
+                valor
+            }
+        }
+
+        categorias {
+            id
+            nombre
+            imagenUrl
+        }
+    }
+`
+
+const { id } = Astro.params
+const productId = Number(id)
+
+let producto: Producto | null = null
+let categorias: Categoria[] = []
+let error: string | null = null
+
+try {
+
+    const data = await graphqlRequest<ProductoData>(
+        QUERY_PRODUCTO,
+        {
+            id: productId
+        }
+    )
+
+    producto = data.product
+    categorias = data.categorias
+
+} catch (err) {
+
+    console.error(err)
+    error = 'No se pudo cargar el producto.'
+
+}
+---
+
+<Layout
+    title={
+        producto
+            ? `${producto.nombre} | ALMĀS`
+            : 'Producto | ALMĀS'
+    }
+>
+
+    <div class="content">
+
+        <Sidebar categorias={categorias} />
+
+        <main>
+
+            {
+                error ? (
+
+                    <p class="error">
+                        {error}
+                    </p>
+
+                ) : !producto ? (
+
+                    <p>
+                        Producto no encontrado.
+                    </p>
+
+                ) : (
+
+                    <div class="product">
+
+                        <div class="image-container">
+
+                            <img
+                                src={
+                                    producto.imagenUrl ||
+                                    'https://placehold.co/600x600?text=ALMAS'
+                                }
+                                alt={producto.nombre}
+                            />
+
+                        </div>
+
+                        <div class="info">
+
+                            <h1>{producto.nombre}</h1>
+
+                            <p class="description">
+                                {producto.descripcion}
+                            </p>
+
+                            <p class="price">
+                                ${producto.precio.toLocaleString('es-MX')}
+                            </p>
+
+                            <p>
+                                Stock disponible: {producto.stock}
+                            </p>
+
+                            {
+                                producto.variantes.length > 0 && (
+
+                                    <div class="variants">
+
+                                        <h3>Variantes</h3>
+
+                                        {
+                                            producto.variantes.map(
+                                                (variante) => (
+
+                                                    <div class="variant">
+                                                        <strong>
+                                                            {variante.tipo}:
+                                                        </strong>
+
+                                                        {' '}
+
+                                                        {variante.valor}
+                                                    </div>
+
+                                                )
+                                            )
+                                        }
+
+                                    </div>
+
+                                )
+                            }
+
+                           <AddToCart
+                                client:load
+                                producto={{
+                                    id: producto.id,
+                                    nombre: producto.nombre,
+                                    precio: producto.precio,
+                                    imagenUrl: producto.imagenUrl,
+                                    stock: producto.stock,
+                                    variantes: producto.variantes
+                                }}
+                            />
+
+                        </div>
+
+                    </div>
+
+                )
+            }
+
+        </main>
+
+    </div>
+
+</Layout>
+
+<style>
+    .content {
+        display: flex;
+    }
+
+    main {
+        flex: 1;
+        min-height: 80vh;
+        padding: 2rem;
+    }
+
+    .product {
+        max-width: 1000px;
+        margin: 0 auto;
+
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 3rem;
+    }
+
+    .image-container img {
+        width: 100%;
+        border-radius: 16px;
+        object-fit: cover;
+    }
+
+    h1 {
+        margin-top: 0;
+
+        font-family: var(--font-heading);
+        color: var(--color-purple);
+    }
+
+    .description {
+        line-height: 1.6;
+    }
+
+    .price {
+        font-size: 1.6rem;
+        font-weight: bold;
+        color: var(--color-purple);
+    }
+
+    .variants {
+        margin: 1.5rem 0;
+    }
+
+    .variant {
+        margin: 0.5rem 0;
+    }
+
+    .add-cart {
+        border: none;
+        border-radius: 999px;
+
+        padding: 0.8rem 1.5rem;
+
+        background-color: var(--color-purple);
+        color: white;
+
+        cursor: pointer;
+    }
+
+    .error {
+        color: #a00;
+    }
+
+    @media (max-width: 700px) {
+        .product {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>

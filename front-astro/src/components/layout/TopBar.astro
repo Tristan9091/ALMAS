@@ -1,0 +1,66 @@
+---
+import CartButton from '../react/CartButton.jsx'
+import SearchBar from '../react/SearchBar.jsx'
+---
+<header>
+    <a class="logo" href="/">
+        ALMĀS
+    </a>
+
+    <SearchBar client:load />
+
+    <CartButton client:load />
+</header>
+
+<style>
+    header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+
+        padding: 1rem 2rem;
+
+        background-color: var(--color-purple);
+        border-bottom: 2px solid var(--color-gold);
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+
+    .logo {
+        margin: 0;
+        font-family: var(--font-heading);
+        font-size: 1.8rem;
+        letter-spacing: 1px;
+        color: #fff;
+        text-decoration: none;
+    }
+
+    input {
+        flex: 0 1 320px;
+
+        padding: 0.5rem 1.2rem;
+        border-radius: 999px;
+
+        border: 1px solid rgba(253, 240, 220, 0.3);
+        background-color: rgba(253, 240, 220, 0.08);
+
+        color: #fff;
+    }
+
+    .cart {
+        display: flex;
+        align-items: center;
+
+        border: 1.5px solid var(--color-gold);
+        color: var(--color-gold);
+
+        padding: 0.5rem;
+        border-radius: 999px;
+
+        font-size: 1.3rem;
+        text-decoration: none;
+    }
+</style>

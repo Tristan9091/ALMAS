@@ -1,0 +1,158 @@
+---
+export const prerender = false
+
+import Layout from '../layouts/Layout.astro'
+import Hero from '../components/layout/Hero.astro'
+import Sidebar from '../components/layout/Sidebar.astro'
+import ProductCard from '../components/ProductCard.astro'
+
+import { graphqlRequest } from '../graphql/client'
+
+interface Categoria {
+    id: number
+    nombre: string
+    imagenUrl?: string | null
+}
+
+interface Producto {
+    id: number
+    nombre: string
+    precio: number
+    imagenUrl?: string | null
+}
+
+interface HomeData {
+    categorias: Categoria[]
+    products: Producto[]
+}
+
+const QUERY_HOME = `
+    query {
+        categorias {
+            id
+            nombre
+            imagenUrl
+        }
+
+        products {
+            id
+            nombre
+            precio
+            imagenUrl
+        }
+    }
+`
+
+let categorias: Categoria[] = []
+let productos: Producto[] = []
+let error: string | null = null
+
+try {
+    const data = await graphqlRequest<HomeData>(QUERY_HOME)
+
+    categorias = data.categorias
+    productos = data.products
+
+} catch (err) {
+    console.error(err)
+    error = 'No se pudo cargar el catálogo.'
+}
+
+
+// BÚSQUEDA
+const buscar =
+    Astro.url.searchParams
+        .get('buscar')
+        ?.trim()
+        .toLowerCase() ?? ''
+
+const productosFiltrados = buscar
+    ? productos.filter((producto) =>
+        producto.nombre
+            .toLowerCase()
+            .includes(buscar)
+    )
+    : productos
+---
+
+<Layout title="ALMĀS">
+
+    <Hero />
+
+    <div class="content">
+
+        <Sidebar categorias={categorias} />
+
+        <main>
+
+            <h2>
+                {
+                    buscar
+                    ? `Resultados para "${buscar}"`
+                    : 'Catálogo'
+                }
+            </h2>
+
+            {
+                error ? (
+                    <p class="error">
+                        {error}
+                    </p>
+
+                ) : productosFiltrados.length === 0 ? (
+                    <p>
+                        No hay productos disponibles.
+                    </p>
+
+                ) : (
+                    <div class="products">
+
+                        {
+                            productosFiltrados.map((producto) => (
+                                <ProductCard
+                                    id={producto.id}
+                                    nombre={producto.nombre}
+                                    precio={producto.precio}
+                                    imagenUrl={producto.imagenUrl}
+                                />
+                            ))
+                        }
+
+                    </div>
+                )
+            }
+
+        </main>
+
+    </div>
+
+</Layout>
+
+<style>
+    .content {
+        display: flex;
+    }
+
+    main {
+        flex: 1;
+        min-height: 80vh;
+        padding: 2rem;
+    }
+
+    h2 {
+        font-family: var(--font-heading);
+        color: var(--color-purple);
+        margin-top: 0;
+    }
+
+    .products {
+        display: grid;
+        grid-template-columns:
+            repeat(auto-fill, minmax(200px, 1fr));
+        gap: 1.5rem;
+    }
+
+    .error {
+        color: #a00;
+    }
+</style>

@@ -1,0 +1,40 @@
+---
+import '../styles/global.css'
+
+import TopBar from '../components/layout/TopBar.astro'
+import Footer from '../components/layout/Footer.astro'
+
+const { title = 'ALMĀS' } = Astro.props
+---
+
+<!doctype html>
+
+<html lang="es">
+
+    <head>
+        <meta charset="UTF-8" />
+
+        <meta
+            name="viewport"
+            content="width=device-width"
+        />
+
+        <meta
+            name="description"
+            content="ALMĀS - Joyería"
+        />
+
+        <title>{title}</title>
+    </head>
+
+    <body>
+
+        <TopBar />
+
+        <slot />
+
+        <Footer />
+
+    </body>
+
+</html>

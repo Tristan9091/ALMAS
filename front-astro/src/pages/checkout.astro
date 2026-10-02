@@ -1,0 +1,28 @@
+---
+import Layout from '../layouts/Layout.astro'
+import Checkout from '../components/react/Checkout.jsx'
+---
+
+<Layout title="Checkout | ALMĀS">
+
+    <main>
+        <h1>Finalizar compra</h1>
+
+        <Checkout client:load />
+    </main>
+
+</Layout>
+
+<style>
+    main {
+        max-width: 900px;
+        min-height: 80vh;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+
+    h1 {
+        font-family: var(--font-heading);
+        color: var(--color-purple);
+    }
+</style>

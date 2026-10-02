@@ -1,0 +1,86 @@
+---
+interface Categoria {
+    id: number
+    nombre: string
+    imagenUrl?: string | null
+}
+
+interface Props {
+    categorias?: Categoria[]
+}
+
+const { categorias = [] } = Astro.props
+---
+<aside>
+    <a class="home-button" href="/">
+        Inicio
+    </a>
+
+    {
+        categorias.map((cat) => (
+            <a
+                class="category"
+                href={`/categoria/${cat.id}`}
+            >
+                <img
+                    src={
+                        cat.imagenUrl ||
+                        `https://placehold.co/80x80/c9a24b/8f1268?text=${cat.nombre[0]}`
+                    }
+                    alt={cat.nombre}
+                />
+
+                <span>{cat.nombre}</span>
+            </a>
+        ))
+    }
+</aside>
+
+<style>
+    aside {
+        width: 110px;
+        padding: 1.5rem 0.5rem;
+
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+
+        gap: 1.5rem;
+    }
+
+    .home-button {
+        border: 1.5px solid var(--color-gold);
+        color: var(--color-gold);
+
+        font-size: 0.75rem;
+        padding: 0.4rem 0.9rem;
+
+        border-radius: 999px;
+        text-decoration: none;
+    }
+
+    .category {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+
+        gap: 0.4rem;
+
+        text-decoration: none;
+    }
+
+    .category img {
+        width: 64px;
+        height: 64px;
+
+        border-radius: 50%;
+        object-fit: cover;
+
+        border: 2px solid rgba(253, 240, 220, 0.4);
+    }
+
+    .category span {
+        font-size: 0.75rem;
+        color: var(--color-text);
+    }
+</style>
