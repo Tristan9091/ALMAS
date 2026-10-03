@@ -1,4 +1,4 @@
-const ENDPOINT = "http://127.0.0.1:8000/graphql";
+const ENDPOINT = "https://almas-1.onrender.com/graphql";
 
 export async function graphqlRequest<T>(
   query: string,
