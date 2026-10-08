@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { graphqlRequest } from "../graphql/client";
+import { graphqlRequest } from "../../graphql/client";
 import "../../styles/auth.css";
 
 const LOGIN_MUTATION = `
