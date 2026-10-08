@@ -42,7 +42,7 @@ export async function graphqlAuthRequest<T>(
     throw new Error("No hay una sesión iniciada.");
   }
 
-  const response = await fetch("http://127.0.0.1:8000/graphql", {
+  const response = await fetch(ENDPOINT, {
     method: "POST",
 
     headers: {
