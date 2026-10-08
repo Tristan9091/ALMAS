@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { graphqlRequest } from "../graphql/client";
 import "../../styles/auth.css";
 
 const LOGIN_MUTATION = `
@@ -32,37 +33,19 @@ export default function LoginForm() {
     setLoading(true);
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/graphql", {
-        method: "POST",
-
-        headers: {
-          "Content-Type": "application/json",
-        },
-
-        body: JSON.stringify({
-          query: LOGIN_MUTATION,
-
-          variables: {
-            email,
-            password,
-          },
-        }),
+      const result = await graphqlRequest(LOGIN_MUTATION, {
+        email,
+        password,
       });
 
-      const result = await response.json();
-
-      if (result.errors) {
-        throw new Error(result.errors[0].message);
-      }
-
-      const { token, usuario } = result.data.login;
+      const { token, usuario } = result.login;
 
       localStorage.setItem("almas-token", token);
-
       localStorage.setItem("almas-user", JSON.stringify(usuario));
 
       window.location.href = "/";
     } catch (err) {
+      console.error(err);
       setError(err.message || "No se pudo iniciar sesión.");
     } finally {
       setLoading(false);

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { graphqlRequest } from "../graphql/client";
 import "../../styles/auth.css";
 
 const REGISTER_MUTATION = `
@@ -36,34 +37,15 @@ export default function RegisterForm() {
     setLoading(true);
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/graphql", {
-        method: "POST",
-
-        headers: {
-          "Content-Type": "application/json",
-        },
-
-        body: JSON.stringify({
-          query: REGISTER_MUTATION,
-
-          variables: {
-            nombre,
-            email,
-            password,
-          },
-        }),
+      await graphqlRequest(REGISTER_MUTATION, {
+        nombre,
+        email,
+        password,
       });
-
-      const result = await response.json();
-
-      if (result.errors) {
-        throw new Error(result.errors[0].message);
-      }
 
       window.location.href = "/login";
     } catch (err) {
       console.error(err);
-
       setError(err.message || "No se pudo crear la cuenta.");
     } finally {
       setLoading(false);
