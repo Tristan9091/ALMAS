@@ -1,9 +1,9 @@
+
 from fastapi import FastAPI, Request
-from strawberry.fastapi import GraphQLRouter
 from fastapi.middleware.cors import CORSMiddleware
+from strawberry.fastapi import GraphQLRouter
 
 from schema import schema
-
 
 app = FastAPI()
 
@@ -12,6 +12,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:4321",
         "http://127.0.0.1:4321",
+        "https://almasjeweler.netlify.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
