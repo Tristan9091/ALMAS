@@ -1,0 +1,21 @@
+# Variables de entorno
+.env
+.env.*
+!.env.example
+
+# Entornos virtuales de Python
+.venv/
+venv/
+
+# Archivos temporales de Python
+__pycache__/
+*.pyc
+
+# Dependencias y compilaciones del frontend
+node_modules/
+dist/
+.astro/
+.netlify/
+
+# Archivos del sistema
+.DS_Store
