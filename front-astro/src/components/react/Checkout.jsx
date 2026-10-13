@@ -7,18 +7,20 @@ import "../../styles/checkout.css";
 export default function Checkout() {
   const cart = useCartStore((state) => state.cart);
 
-  const clearCart = useCartStore((state) => state.clearCart);
-
   const [nombre, setNombre] = useState("");
   const [email, setEmail] = useState("");
   const [direccion, setDireccion] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [pedido, setPedido] = useState(null);
+
+  // Si el pedido se creó pero falló Mercado Pago, se reintenta
+  // con el mismo pedido en lugar de crear uno nuevo.
+  const [pedidoId, setPedidoId] = useState(null);
 
   const [checkingAuth, setCheckingAuth] = useState(true);
 
+  // Total aproximado para mostrar. El total que se cobra lo calcula el backend.
   const total = cart.reduce(
     (sum, item) => sum + item.precio * item.cantidad,
     0,
@@ -34,7 +36,11 @@ export default function Checkout() {
       }
 
       try {
-        await graphqlAuthRequest(ME_QUERY);
+        const data = await graphqlAuthRequest(ME_QUERY);
+
+        // Rellena los datos del comprador con su cuenta.
+        setNombre((actual) => actual || data.me.nombre);
+        setEmail((actual) => actual || data.me.email);
 
         setCheckingAuth(false);
       } catch (err) {
@@ -57,53 +63,46 @@ export default function Checkout() {
     setError(null);
 
     try {
-      const data = await graphqlAuthRequest(CREAR_PEDIDO, {
-        data: {
-          nombreComprador: nombre,
-          emailComprador: email,
-          direccionEnvio: direccion,
+      let idPedido = pedidoId;
 
-          detalles: cart.map((item) => ({
-            productoId: item.id,
-            varianteId: item.varianteId ?? null,
-            cantidad: item.cantidad,
-            precioUnitario: item.precio,
-          })),
-        },
+      // 1. Crear el pedido (el backend valida precios y stock).
+      if (!idPedido) {
+        const data = await graphqlAuthRequest(CREAR_PEDIDO, {
+          data: {
+            nombreComprador: nombre,
+            emailComprador: email,
+            direccionEnvio: direccion,
+
+            detalles: cart.map((item) => ({
+              productoId: item.id,
+              varianteId: item.varianteId ?? null,
+              cantidad: item.cantidad,
+            })),
+          },
+        });
+
+        idPedido = data.crearPedido.id;
+        setPedidoId(idPedido);
+      }
+
+      // 2. Pedir a nuestro backend el link de pago de Mercado Pago.
+      const pago = await graphqlAuthRequest(CREAR_PREFERENCIA_PAGO, {
+        pedidoId: idPedido,
       });
 
-      setPedido(data.crearPedido);
-
-      clearCart();
+      // 3. Llevar al comprador a Mercado Pago.
+      // El carrito NO se vacía aquí: se vacía cuando el pago se confirma.
+      window.location.href = pago.crearPreferenciaPago.initPoint;
     } catch (err) {
       console.error(err);
 
-      setError("No se pudo realizar el pedido.");
-    } finally {
+      setError(err.message || "No se pudo iniciar el pago.");
       setLoading(false);
     }
   };
 
   if (checkingAuth) {
     return <p>Comprobando sesión...</p>;
-  }
-
-  if (pedido) {
-    return (
-      <div className="success">
-        <h2>¡Pedido realizado!</h2>
-
-        <p>Pedido #{pedido.id}</p>
-
-        <p>Comprador: {pedido.nombreComprador}</p>
-
-        <p>Estado: {pedido.estatus}</p>
-
-        <p>Total: ${pedido.total.toLocaleString("es-MX")}</p>
-
-        <a href="/">Volver al catálogo</a>
-      </div>
-    );
   }
 
   if (cart.length === 0) {
@@ -125,6 +124,7 @@ export default function Checkout() {
             type="text"
             value={nombre}
             onChange={(e) => setNombre(e.target.value)}
+            disabled={pedidoId !== null}
             required
           />
         </label>
@@ -135,6 +135,7 @@ export default function Checkout() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            disabled={pedidoId !== null}
             required
           />
         </label>
@@ -144,6 +145,7 @@ export default function Checkout() {
           <textarea
             value={direccion}
             onChange={(e) => setDireccion(e.target.value)}
+            disabled={pedidoId !== null}
             required
           />
         </label>
@@ -151,8 +153,17 @@ export default function Checkout() {
         {error && <p className="error">{error}</p>}
 
         <button type="submit" disabled={loading}>
-          {loading ? "Procesando..." : "Realizar pedido"}
+          {loading
+            ? "Conectando con Mercado Pago..."
+            : pedidoId
+              ? "Reintentar pago"
+              : "Pagar con Mercado Pago"}
         </button>
+
+        <p className="checkout-nota">
+          Serás redirigido a Mercado Pago para pagar de forma segura con
+          tarjeta, efectivo o transferencia.
+        </p>
       </form>
 
       <aside className="order-summary">
@@ -161,7 +172,8 @@ export default function Checkout() {
         {cart.map((item) => (
           <div className="summary-item" key={item.cartKey}>
             <span>
-              {item.nombre} × {item.cantidad}
+              {item.nombre}
+              {item.variante ? ` (${item.variante})` : ""} × {item.cantidad}
             </span>
 
             <span>
@@ -179,16 +191,20 @@ export default function Checkout() {
 }
 
 const CREAR_PEDIDO = `
-    mutation CrearPedido($data: PedidoInput!) {
-
-        crearPedido(data: $data) {
-            id
-            nombreComprador
-            estatus
-            total
-        }
-
+  mutation CrearPedido($data: PedidoInput!) {
+    crearPedido(data: $data) {
+      id
+      total
     }
+  }
+`;
+
+const CREAR_PREFERENCIA_PAGO = `
+  mutation CrearPreferenciaPago($pedidoId: Int!) {
+    crearPreferenciaPago(pedidoId: $pedidoId) {
+      initPoint
+    }
+  }
 `;
 
 const ME_QUERY = `
