@@ -21,6 +21,7 @@ from models import (
     Pago as PagoDB,
 )
 from payments import crear_preferencia, ErrorMercadoPago
+from webhooks import procesar_pago_mp
 
 
 @strawberry.type
@@ -139,6 +140,29 @@ class Query:
         email=usuario.email
         )
 
+    @strawberry.field
+    def estado_pedido(self, info: Info, pedido_id: int) -> "EstadoPagoType":
+        """Estado actual de un pedido del usuario y de su último pago."""
+        usuario = obtener_usuario_actual(info)
+
+        with Session(engine) as session:
+            pedido = session.get(PedidoDB, pedido_id)
+            if pedido is None or pedido.usuario_id != usuario.id:
+                raise ValueError("Pedido no encontrado.")
+
+            ultimo_pago = session.exec(
+                select(PagoDB)
+                .where(PagoDB.pedido_id == pedido.id)
+                .order_by(PagoDB.fecha_actualizacion.desc(), PagoDB.id.desc())
+            ).first()
+
+            return EstadoPagoType(
+                pedido_id=pedido.id,
+                estatus_pedido=pedido.estatus,
+                estado_pago=ultimo_pago.estado if ultimo_pago else None,
+                total=pedido.total,
+            )
+
 @strawberry.input
 class ProductoInput:
     nombre: str
@@ -180,6 +204,16 @@ class PreferenciaPagoType:
     pago_id: int
     preference_id: str
     init_point: str
+
+
+@strawberry.type
+class EstadoPagoType:
+    pedido_id: int
+    # Estado del negocio: pendiente, pagado, enviado, reembolsado.
+    estatus_pedido: str
+    # Estado según Mercado Pago: approved, pending, rejected...
+    estado_pago: Optional[str] = None
+    total: float
 
 @strawberry.input
 class RegistroInput:
@@ -452,6 +486,33 @@ class Mutation:
                 preference_id=preferencia["id"],
                 init_point=preferencia["init_point"],
             )
+
+    @strawberry.mutation
+    def sincronizar_pago(self, info: Info, pedido_id: int, payment_id: str) -> EstadoPagoType:
+        """
+        Verifica un pago con Mercado Pago cuando el comprador regresa a la tienda.
+
+        El payment_id llega en la URL de retorno, pero no se confía en ella:
+        el estado real se consulta a Mercado Pago. Sirve en local, donde
+        los webhooks no pueden llegar, y como respaldo si un webhook se retrasa.
+        """
+        usuario = obtener_usuario_actual(info)
+
+        with Session(engine) as session:
+            pedido = session.get(PedidoDB, pedido_id)
+            if pedido is None or pedido.usuario_id != usuario.id:
+                raise ValueError("Pedido no encontrado.")
+
+        try:
+            resumen = procesar_pago_mp(payment_id, pedido_esperado=pedido_id)
+        except ErrorMercadoPago as error:
+            print(f"[Mercado Pago] Pedido {pedido_id}: {error}")
+            raise ValueError("No se pudo verificar el pago. Intenta de nuevo en unos minutos.")
+
+        if resumen is None:
+            raise ValueError("No se encontró información de este pago.")
+
+        return EstadoPagoType(**resumen)
 
     @strawberry.mutation
     def registrar_usuario(

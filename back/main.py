@@ -6,6 +6,7 @@ from strawberry.fastapi import GraphQLRouter
 
 from database import crear_tablas
 from schema import schema
+from webhooks import router as webhooks_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -43,3 +44,6 @@ app.include_router(
     graphql_app,
     prefix="/graphql"
 )
+
+# Ruta HTTP normal (no GraphQL) porque Mercado Pago llama directo al servidor.
+app.include_router(webhooks_router)
