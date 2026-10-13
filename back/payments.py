@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import os
 import requests
 from dotenv import load_dotenv
@@ -96,3 +98,68 @@ def crear_preferencia(
         "id": datos["id"],
         "init_point": datos["init_point"],
     }
+
+
+def obtener_pago(payment_id: str) -> dict:
+    # Consulta un pago directamente a Mercado Pago.
+    # Es la única fuente confiable del estado real de un pago.
+    if not str(payment_id).isdigit():
+        raise ErrorMercadoPago("El identificador de pago no es válido.")
+
+    try:
+        respuesta = requests.get(
+            f"{API_MP}/v1/payments/{payment_id}",
+            headers={"Authorization": f"Bearer {_access_token()}"},
+            timeout=TIMEOUT_SEGUNDOS,
+        )
+    except requests.RequestException as error:
+        raise ErrorMercadoPago(f"No se pudo conectar con Mercado Pago: {error}") from error
+
+    if respuesta.status_code != 200:
+        raise ErrorMercadoPago(
+            f"Mercado Pago respondió {respuesta.status_code}: {_mensaje_de_error(respuesta)}"
+        )
+
+    return respuesta.json()
+
+
+def validar_firma_webhook(
+    x_signature: str | None,
+    x_request_id: str | None,
+    data_id: str | None,
+) -> bool:
+    # Comprueba que la notificación realmente viene de Mercado Pago.
+    # Mercado Pago firma con HMAC-SHA256 el texto
+    #   id:<data.id>;request-id:<x-request-id>;ts:<ts>;
+    # usando la clave secreta de Webhooks del panel (MP_WEBHOOK_SECRET).
+    secreto = (os.getenv("MP_WEBHOOK_SECRET") or "").strip()
+    if not secreto or not x_signature:
+        return False
+
+    partes = {}
+    for parte in x_signature.split(","):
+        clave, _, valor = parte.strip().partition("=")
+        partes[clave.strip()] = valor.strip()
+
+    ts = partes.get("ts")
+    firma_recibida = partes.get("v1")
+    if not ts or not firma_recibida:
+        return False
+
+    # Solo se incluyen los datos que llegaron en la notificación.
+    manifest = ""
+    if data_id:
+        manifest += f"id:{str(data_id).lower()};"
+    if x_request_id:
+        manifest += f"request-id:{x_request_id};"
+    manifest += f"ts:{ts};"
+
+    firma_calculada = hmac.new(
+        secreto.encode("utf-8"),
+        manifest.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    # compare_digest evita ataques que miden cuánto tarda la comparación.
+    return hmac.compare_digest(firma_calculada, firma_recibida)
+    
