@@ -24,6 +24,9 @@ class Producto(SQLModel, table=True):
     imagen_url: str
     stock: int
     categoria_id: int = Field(foreign_key="categoria.id")
+    # False = producto desactivado: no aparece en la tienda, pero se
+    # conserva para no romper el historial de pedidos que lo incluyen.
+    activo: bool = True
 
     categoria: Optional[Categoria] = Relationship(back_populates="productos")
     variantes: List["Variante"] = Relationship(back_populates="producto")
@@ -74,6 +77,10 @@ class Usuario(SQLModel, table=True):
     password_hash: str
 
     activo: bool = True
+
+    # "cliente" o "admin". El registro público siempre asigna "cliente";
+    # un admin solo se crea con el script crear_admin.py.
+    rol: str = "cliente"
 
     pedidos: List["Pedido"] = Relationship(back_populates="usuario")
 

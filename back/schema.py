@@ -118,7 +118,9 @@ class Query:
             return CategoriaType(id=c.id, nombre=c.nombre, imagenUrl=c.imagen_url)
 
     @strawberry.field
-    def pedidos(self) -> List[PedidoHistorialType]:
+    def pedidos(self, info: Info) -> List[PedidoHistorialType]:
+        # Lista de TODOS los pedidos de la tienda: solo para administradores.
+        requerir_admin(info)
         with Session(engine) as session:
             peds = session.exec(select(PedidoDB)).all()
             return [
@@ -134,11 +136,7 @@ class Query:
 
         usuario = obtener_usuario_actual(info)
 
-        return UsuarioType(
-        id=usuario.id,
-        nombre=usuario.nombre,
-        email=usuario.email
-        )
+        return usuario_a_type(usuario)
 
     @strawberry.field
     def estado_pedido(self, info: Info, pedido_id: int) -> "EstadoPagoType":
@@ -231,6 +229,17 @@ class UsuarioType:
     id: int
     nombre: str
     email: str
+    rol: str
+
+
+def usuario_a_type(usuario: UsuarioDB) -> UsuarioType:
+    # Nunca incluye password_hash: ese dato no sale del backend.
+    return UsuarioType(
+        id=usuario.id,
+        nombre=usuario.nombre,
+        email=usuario.email,
+        rol=usuario.rol,
+    )
 
 @strawberry.type
 class AuthPayload:
@@ -290,10 +299,26 @@ def obtener_usuario_actual(
         return usuario
 
 
+def requerir_admin(info: Info) -> UsuarioDB:
+    """
+    Permite continuar solo si quien hace la petición es administrador.
+
+    El rol se lee de la base de datos en cada petición (no del token),
+    así que quitarle el rol a alguien le quita el acceso de inmediato.
+    """
+    usuario = obtener_usuario_actual(info)
+
+    if usuario.rol != "admin":
+        raise ValueError("No tienes permiso para realizar esta acción.")
+
+    return usuario
+
+
 @strawberry.type
 class Mutation:
     @strawberry.mutation
-    def crear_producto(self, data: ProductoInput) -> ProductoType:
+    def crear_producto(self, info: Info, data: ProductoInput) -> ProductoType:
+        requerir_admin(info)
         with Session(engine) as session:
             nuevo = ProductoDB(**data.__dict__)
             session.add(nuevo)
@@ -302,7 +327,10 @@ class Mutation:
             return producto_a_type(nuevo, session)
 
     @strawberry.mutation
-    def actualizar_stock(self, id: int, nuevo_stock: int) -> Optional[ProductoType]:
+    def actualizar_stock(self, info: Info, id: int, nuevo_stock: int) -> Optional[ProductoType]:
+        requerir_admin(info)
+        if nuevo_stock < 0:
+            raise ValueError("El stock no puede ser negativo.")
         with Session(engine) as session:
             p = session.get(ProductoDB, id)
             if p is None:
@@ -314,7 +342,8 @@ class Mutation:
             return producto_a_type(p, session)
 
     @strawberry.mutation
-    def eliminar_producto(self, id: int) -> bool:
+    def eliminar_producto(self, info: Info, id: int) -> bool:
+        requerir_admin(info)
         with Session(engine) as session:
             p = session.get(ProductoDB, id)
             if p is None:
@@ -538,18 +567,17 @@ class Mutation:
             email=data.email,
             password_hash=hash_password(
                 data.password
-            )
+            ),
+            # El registro público SIEMPRE crea clientes. RegistroInput no
+            # tiene campo "rol", así que nadie puede pedir ser admin.
+            rol="cliente",
         )
 
         session.add(usuario)
         session.commit()
         session.refresh(usuario)
 
-        return UsuarioType(
-            id=usuario.id,
-            nombre=usuario.nombre,
-            email=usuario.email
-        )
+        return usuario_a_type(usuario)
 
     @strawberry.mutation
     def login(
@@ -594,11 +622,7 @@ class Mutation:
 
         return AuthPayload(
             token=token,
-            usuario=UsuarioType(
-                id=usuario.id,
-                nombre=usuario.nombre,
-                email=usuario.email
-            )
+            usuario=usuario_a_type(usuario),
         )
 
 
