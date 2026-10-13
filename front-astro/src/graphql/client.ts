@@ -1,4 +1,8 @@
-const ENDPOINT = "https://almas-1.onrender.com/graphql";
+// URL del backend. Para probar en tu computadora crea front-astro/.env con:
+//   PUBLIC_GRAPHQL_URL=http://127.0.0.1:8000/graphql
+// Si no existe la variable, se usa el backend publicado en Render.
+const ENDPOINT =
+  import.meta.env.PUBLIC_GRAPHQL_URL ?? "https://almas-1.onrender.com/graphql";
 
 export async function graphqlRequest<T>(
   query: string,
