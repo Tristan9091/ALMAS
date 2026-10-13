@@ -3,19 +3,26 @@
 .env.*
 !.env.example
 
-# Entornos virtuales de Python
+# Entornos virtuales
 .venv/
 venv/
 
-# Archivos temporales de Python
+# Python
 __pycache__/
 *.pyc
 
-# Dependencias y compilaciones del frontend
+# Base de datos local
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+*.respaldo-*-sqlite3
+
+# Frontend
 node_modules/
 dist/
 .astro/
 .netlify/
 
-# Archivos del sistema
+# Sistema
 .DS_Store

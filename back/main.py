@@ -4,13 +4,17 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from strawberry.fastapi import GraphQLRouter
 
+from crear_admin import asegurar_admin_desde_entorno
 from database import crear_tablas
 from schema import schema
 from webhooks import router as webhooks_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Crea tablas faltantes y agrega columnas nuevas (con respaldo previo).
     crear_tablas()
+    # Si existen ADMIN_EMAIL y ADMIN_PASSWORD, asegura esa cuenta de admin.
+    asegurar_admin_desde_entorno()
     yield
 
 app = FastAPI(lifespan=lifespan)
