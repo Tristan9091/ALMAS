@@ -18,7 +18,9 @@ from models import (
     Pedido as PedidoDB,
     DetallePedido as DetallePedidoDB,
     Usuario as UsuarioDB,
+    Pago as PagoDB,
 )
+from payments import crear_preferencia, ErrorMercadoPago
 
 
 @strawberry.type
@@ -152,7 +154,9 @@ class DetallePedidoInput:
     producto_id: int
     variante_id: Optional[int] = None
     cantidad: int
-    precio_unitario: float
+    # Se acepta para no romper el frontend, pero el backend lo ignora:
+    # el precio real siempre se toma de la base de datos.
+    precio_unitario: Optional[float] = None
 
 
 @strawberry.input
@@ -169,6 +173,13 @@ class PedidoType:
     nombre_comprador: str
     estatus: str
     total: float
+
+
+@strawberry.type
+class PreferenciaPagoType:
+    pago_id: int
+    preference_id: str
+    init_point: str
 
 @strawberry.input
 class RegistroInput:
@@ -280,9 +291,49 @@ class Mutation:
 
     @strawberry.mutation
     def crear_pedido(self, info: Info, data: PedidoInput) -> PedidoType:
+        """
+        Crea un pedido pendiente de pago.
+
+        Los precios y el stock se consultan en la base de datos; los valores
+        que manda el navegador no se usan. El inventario NO se descuenta aquí:
+        se descontará cuando Mercado Pago confirme que el pago fue aprobado.
+        """
         usuario = obtener_usuario_actual(info)
+
+        if not data.detalles:
+            raise ValueError("El pedido no tiene productos.")
+
         with Session(engine) as session:
-            total = sum(d.cantidad * d.precio_unitario for d in data.detalles)
+            renglones = []
+            cantidad_por_producto: dict[int, int] = {}
+
+            for d in data.detalles:
+                if d.cantidad <= 0:
+                    raise ValueError("Las cantidades deben ser mayores a cero.")
+
+                producto = session.get(ProductoDB, d.producto_id)
+                if producto is None:
+                    raise ValueError(f"El producto {d.producto_id} ya no existe.")
+
+                if d.variante_id is not None:
+                    variante = session.get(VarianteDB, d.variante_id)
+                    if variante is None or variante.producto_id != producto.id:
+                        raise ValueError(
+                            f"La variante elegida no corresponde a {producto.nombre}."
+                        )
+
+                # Varias variantes del mismo producto comparten el stock.
+                cantidad_por_producto[producto.id] = (
+                    cantidad_por_producto.get(producto.id, 0) + d.cantidad
+                )
+                if cantidad_por_producto[producto.id] > producto.stock:
+                    raise ValueError(
+                        f"Solo quedan {producto.stock} piezas de {producto.nombre}."
+                    )
+
+                renglones.append((d, float(producto.precio)))
+
+            total = round(sum(d.cantidad * precio for d, precio in renglones), 2)
 
             pedido = PedidoDB(
                 nombre_comprador=data.nombre_comprador,
@@ -296,20 +347,14 @@ class Mutation:
             session.commit()
             session.refresh(pedido)
 
-            for d in data.detalles:
-                detalle = DetallePedidoDB(
+            for d, precio in renglones:
+                session.add(DetallePedidoDB(
                     pedido_id=pedido.id,
                     producto_id=d.producto_id,
                     variante_id=d.variante_id,
                     cantidad=d.cantidad,
-                    precio_unitario=d.precio_unitario,
-                )
-                session.add(detalle)
-
-                producto = session.get(ProductoDB, d.producto_id)
-                if producto:
-                    producto.stock = max(0, producto.stock - d.cantidad)
-                    session.add(producto)
+                    precio_unitario=precio,
+                ))
 
             session.commit()
 
@@ -318,6 +363,94 @@ class Mutation:
                 nombre_comprador=pedido.nombre_comprador,
                 estatus=pedido.estatus,
                 total=pedido.total,
+            )
+
+    @strawberry.mutation
+    def crear_preferencia_pago(self, info: Info, pedido_id: int) -> PreferenciaPagoType:
+        """
+        Inicia el cobro de un pedido con Mercado Pago Checkout Pro.
+
+        Regresa el init_point: el link al que el frontend debe mandar
+        al comprador para que pague.
+        """
+        usuario = obtener_usuario_actual(info)
+
+        with Session(engine) as session:
+            pedido = session.get(PedidoDB, pedido_id)
+
+            # Mismo mensaje en ambos casos para no revelar pedidos ajenos.
+            if pedido is None or pedido.usuario_id != usuario.id:
+                raise ValueError("Pedido no encontrado.")
+
+            if pedido.estatus != "pendiente":
+                raise ValueError("Este pedido ya no está pendiente de pago.")
+
+            ya_aprobado = session.exec(
+                select(PagoDB).where(
+                    PagoDB.pedido_id == pedido.id,
+                    PagoDB.estado == "approved",
+                )
+            ).first()
+            if ya_aprobado:
+                raise ValueError("Este pedido ya fue pagado.")
+
+            detalles = session.exec(
+                select(DetallePedidoDB).where(DetallePedidoDB.pedido_id == pedido.id)
+            ).all()
+            if not detalles:
+                raise ValueError("El pedido no tiene productos.")
+
+            items = []
+            for d in detalles:
+                producto = session.get(ProductoDB, d.producto_id)
+                if producto is None:
+                    raise ValueError("Uno de los productos del pedido ya no existe.")
+                if d.cantidad > producto.stock:
+                    raise ValueError(f"Ya no hay stock suficiente de {producto.nombre}.")
+
+                titulo = producto.nombre
+                if d.variante_id is not None:
+                    variante = session.get(VarianteDB, d.variante_id)
+                    if variante:
+                        titulo = f"{producto.nombre} ({variante.tipo} {variante.valor})"
+
+                items.append({
+                    "id": producto.id,
+                    "title": titulo,
+                    "quantity": d.cantidad,
+                    "unit_price": d.precio_unitario,
+                })
+
+            try:
+                preferencia = crear_preferencia(
+                    pedido_id=pedido.id,
+                    items=items,
+                    email_comprador=pedido.email_comprador,
+                )
+            except ErrorMercadoPago as error:
+                # El detalle técnico queda en la consola del servidor;
+                # al cliente solo le llega un mensaje general.
+                print(f"[Mercado Pago] Pedido {pedido.id}: {error}")
+                raise ValueError(
+                    "No se pudo iniciar el pago con Mercado Pago. Intenta de nuevo."
+                )
+
+            pago = PagoDB(
+                pedido_id=pedido.id,
+                proveedor="mercadopago",
+                preference_id=preferencia["id"],
+                monto=pedido.total,
+                moneda="MXN",
+                estado="creado",
+            )
+            session.add(pago)
+            session.commit()
+            session.refresh(pago)
+
+            return PreferenciaPagoType(
+                pago_id=pago.id,
+                preference_id=preferencia["id"],
+                init_point=preferencia["init_point"],
             )
 
     @strawberry.mutation
