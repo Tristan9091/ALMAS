@@ -22,6 +22,7 @@ from models import (
 )
 from payments import crear_preferencia, ErrorMercadoPago
 from webhooks import procesar_pago_mp
+from panel import ResumenAdminType, calcular_resumen
 
 
 @strawberry.type
@@ -137,6 +138,12 @@ class Query:
         usuario = obtener_usuario_actual(info)
 
         return usuario_a_type(usuario)
+
+    @strawberry.field
+    def resumen_admin(self, info: Info, dias: int = 30) -> ResumenAdminType:
+        """Datos del inicio del dashboard. Solo para administradores."""
+        requerir_admin(info)
+        return calcular_resumen(dias)
 
     @strawberry.field
     def estado_pedido(self, info: Info, pedido_id: int) -> "EstadoPagoType":

@@ -1,0 +1,593 @@
+/* ============================================================
+   Panel de administración de ALMĀS
+   Usa los mismos colores de la tienda (global.css) y agrega
+   solo los tonos neutros que necesita un panel de datos.
+   ============================================================ */
+
+.admin-body {
+  --admin-fondo: #faf7f9;
+  --admin-superficie: #ffffff;
+  --admin-borde: #ece3ea;
+  --admin-rejilla: #eee8ec;
+  --admin-texto-sec: #6d5573;
+  --admin-texto-tenue: #9a8a9e;
+
+  /* Estados: siempre van con ícono + texto */
+  --estado-bien: #1f6e43;
+  --estado-bien-fondo: #e6f2eb;
+  --estado-aviso: #7a5a14;
+  --estado-aviso-fondo: #f8efd9;
+  --estado-critico: #a3122a;
+  --estado-critico-fondo: #fbe7ea;
+  --estado-info: #8f1268;
+  --estado-info-fondo: #f6e7f1;
+  --estado-neutro: #5f5763;
+  --estado-neutro-fondo: #f0edf1;
+
+  background: var(--admin-fondo);
+}
+
+/* ---------- Estructura: menú lateral + contenido ---------- */
+
+.admin-shell {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.admin-sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+
+  padding: 1.5rem 1rem;
+
+  background: var(--color-purple);
+  border-right: 2px solid var(--color-gold);
+}
+
+.admin-marca {
+  display: flex;
+  flex-direction: column;
+  padding: 0 0.6rem;
+
+  font-family: var(--font-heading);
+  font-size: 1.6rem;
+  letter-spacing: 1px;
+  color: #fff;
+  text-decoration: none;
+}
+
+.admin-marca span {
+  font-family: system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-gold);
+}
+
+.admin-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.admin-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 500;
+  text-decoration: none;
+
+  transition: background-color 0.15s ease;
+}
+
+.admin-nav-item svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  fill: currentColor;
+}
+
+a.admin-nav-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.admin-nav-item.activo {
+  background: #fff;
+  color: var(--color-purple);
+  font-weight: 700;
+}
+
+.admin-nav-item.deshabilitado {
+  color: rgba(255, 255, 255, 0.45);
+  cursor: default;
+}
+
+.admin-nav-item small {
+  margin-left: auto;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid rgba(201, 162, 75, 0.5);
+  border-radius: 999px;
+  color: var(--color-gold);
+  font-size: 0.65rem;
+  font-weight: 600;
+}
+
+.admin-ver-tienda {
+  margin-top: auto;
+  padding: 0 0.6rem;
+  color: var(--color-gold);
+  font-size: 0.9rem;
+  text-decoration: none;
+}
+
+.admin-ver-tienda:hover {
+  text-decoration: underline;
+}
+
+.admin-main {
+  min-width: 0;
+  padding: 2rem 2.5rem 3rem;
+}
+
+.admin-pagina {
+  max-width: 1200px;
+  margin: 0 auto;
+
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* ---------- Encabezado de página ---------- */
+
+.admin-encabezado {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 1rem;
+}
+
+.admin-encabezado h1 {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 2rem;
+  color: var(--color-purple);
+}
+
+.admin-saludo {
+  margin: 0 0 0.2rem;
+  color: var(--admin-texto-sec);
+}
+
+/* ---------- Botones y enlaces ---------- */
+
+.admin-boton {
+  display: inline-block;
+  padding: 0.6rem 1.2rem;
+
+  border: none;
+  border-radius: 999px;
+
+  background: var(--color-purple);
+  color: #fff;
+
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+
+  cursor: pointer;
+}
+
+.admin-boton.secundario {
+  background: transparent;
+  border: 1.5px solid var(--color-purple);
+  color: var(--color-purple);
+}
+
+.admin-boton:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.admin-enlace {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-purple);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ---------- Mensajes ---------- */
+
+.admin-cargando,
+.admin-vacio,
+.admin-nota {
+  color: var(--admin-texto-sec);
+}
+
+.admin-nota {
+  margin: 0.75rem 0 0;
+  font-size: 0.85rem;
+}
+
+.admin-aviso {
+  max-width: 520px;
+  margin: 4rem auto;
+  padding: 2.5rem 2rem;
+
+  background: var(--admin-superficie);
+  border: 1px solid var(--admin-borde);
+  border-top: 6px solid var(--color-gold);
+  border-radius: 14px;
+
+  text-align: center;
+}
+
+.admin-aviso h1 {
+  margin-top: 0;
+  font-family: var(--font-heading);
+  color: var(--color-purple);
+}
+
+.admin-aviso-linea {
+  padding: 0.8rem 1rem;
+  border-radius: 10px;
+  background: var(--estado-critico-fondo);
+  color: var(--estado-critico);
+}
+
+/* ---------- Tarjetas de indicadores ---------- */
+
+.tarjetas {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.tarjeta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+
+  padding: 1.1rem 1.2rem;
+
+  background: var(--admin-superficie);
+  border: 1px solid var(--admin-borde);
+  border-radius: 14px;
+}
+
+.tarjeta.destacada {
+  border-top: 4px solid var(--color-gold);
+}
+
+.tarjeta p {
+  margin: 0;
+}
+
+.tarjeta-etiqueta {
+  color: var(--admin-texto-sec);
+  font-size: 0.9rem;
+}
+
+.tarjeta-valor {
+  color: var(--color-text);
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.tarjeta-detalle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+
+  color: var(--admin-texto-tenue);
+  font-size: 0.82rem;
+}
+
+/* ---------- Tarjetas de contenido ---------- */
+
+.admin-tarjeta {
+  min-width: 0;
+  padding: 1.25rem 1.4rem;
+
+  background: var(--admin-superficie);
+  border: 1px solid var(--admin-borde);
+  border-radius: 14px;
+}
+
+.admin-tarjeta-titulo {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.25rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.admin-tarjeta-titulo h2 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 1.1rem;
+}
+
+.admin-tarjeta-titulo p {
+  margin: 0;
+  color: var(--admin-texto-sec);
+  font-size: 0.9rem;
+}
+
+.admin-columnas {
+  display: grid;
+  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+/* ---------- Etiquetas de estado ---------- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-bien { background: var(--estado-bien-fondo); color: var(--estado-bien); }
+.badge-aviso { background: var(--estado-aviso-fondo); color: var(--estado-aviso); }
+.badge-critico { background: var(--estado-critico-fondo); color: var(--estado-critico); }
+.badge-info { background: var(--estado-info-fondo); color: var(--estado-info); }
+.badge-neutro { background: var(--estado-neutro-fondo); color: var(--estado-neutro); }
+.badge-vacio { color: var(--admin-texto-tenue); font-weight: 400; }
+
+/* ---------- Tablas ---------- */
+
+.tabla-desplazable {
+  overflow-x: auto;
+}
+
+.admin-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.admin-tabla th {
+  padding: 0 0.75rem 0.6rem;
+  border-bottom: 1px solid var(--admin-borde);
+  color: var(--admin-texto-sec);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.admin-tabla td {
+  padding: 0.7rem 0.75rem;
+  border-bottom: 1px solid var(--admin-rejilla);
+  vertical-align: middle;
+}
+
+.admin-tabla tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.admin-tabla tbody tr:hover {
+  background: #fcf9fb;
+}
+
+.admin-tabla .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.admin-tabla small {
+  display: block;
+  color: var(--admin-texto-tenue);
+  font-size: 0.78rem;
+}
+
+.tabla-id {
+  color: var(--color-purple);
+  font-weight: 700;
+}
+
+.tabla-fecha {
+  white-space: nowrap;
+  color: var(--admin-texto-sec);
+}
+
+.tabla-compacta td {
+  padding: 0.5rem 0.75rem;
+}
+
+/* ---------- Alertas de inventario ---------- */
+
+.alertas {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.alertas li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--admin-rejilla);
+}
+
+.alertas li:last-child {
+  border-bottom: none;
+}
+
+/* ---------- Gráfica ---------- */
+
+.grafica {
+  position: relative;
+  width: 100%;
+}
+
+.grafica svg {
+  display: block;
+  overflow: visible;
+}
+
+.grafica-rejilla {
+  stroke: var(--admin-rejilla);
+  stroke-width: 1;
+}
+
+.grafica-base {
+  stroke: #d8cdd6;
+  stroke-width: 1;
+}
+
+.grafica-eje {
+  fill: var(--admin-texto-tenue);
+  font-size: 11px;
+}
+
+.grafica-valor {
+  fill: var(--color-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.grafica-barra {
+  fill: var(--color-purple);
+  transition: opacity 0.12s ease;
+}
+
+.grafica-barra.activa {
+  opacity: 0.72;
+}
+
+.grafica-zona {
+  fill: transparent;
+  cursor: default;
+  outline: none;
+}
+
+.grafica-zona:focus-visible {
+  fill: rgba(143, 18, 104, 0.06);
+}
+
+.grafica-tooltip {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+
+  padding: 0.5rem 0.75rem;
+
+  background: var(--admin-superficie);
+  border: 1px solid var(--admin-borde);
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(62, 8, 78, 0.12);
+
+  white-space: nowrap;
+}
+
+.grafica-tooltip strong {
+  color: var(--color-text);
+  font-size: 1rem;
+}
+
+.grafica-tooltip span {
+  color: var(--admin-texto-sec);
+  font-size: 0.8rem;
+}
+
+/* ---------- Pantallas más chicas ---------- */
+
+@media (max-width: 1100px) {
+  .tarjetas {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-columnas {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .admin-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-sidebar {
+    min-width: 0;
+    position: static;
+    height: auto;
+    gap: 1rem;
+    padding: 1rem;
+    border-right: none;
+    border-bottom: 2px solid var(--color-gold);
+  }
+
+  .admin-nav {
+    min-width: 0;
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .admin-nav-item {
+    white-space: nowrap;
+  }
+
+  .admin-nav-item small,
+  .admin-ver-tienda {
+    display: none;
+  }
+
+  .admin-main {
+    padding: 1.25rem 1rem 2rem;
+  }
+
+  .tarjetas {
+    gap: 0.75rem;
+  }
+
+  .tarjeta {
+    padding: 0.9rem 1rem;
+  }
+
+  .tarjeta-valor {
+    font-size: 1.3rem;
+  }
+
+  .admin-encabezado h1 {
+    font-size: 1.6rem;
+  }
+}
