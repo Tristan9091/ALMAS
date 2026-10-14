@@ -66,3 +66,24 @@
   background-color: var(--color-gold);
   color: var(--color-purple);
 }
+
+/* Panel de administración (solo visible para admins) */
+
+.auth-panel {
+  padding: 0.5rem 1rem;
+
+  border-radius: 999px;
+
+  background: var(--color-gold);
+  color: var(--color-purple);
+
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-decoration: none;
+
+  white-space: nowrap;
+}
+
+.auth-panel:hover {
+  background: #fff;
+}

@@ -1,0 +1,28 @@
+# Variables de entorno
+.env
+.env.*
+!.env.example
+
+# Entornos virtuales
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# Base de datos local
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+*.respaldo-*-sqlite3
+
+# Frontend
+node_modules/
+dist/
+.astro/
+.netlify/
+
+# Sistema
+.DS_Store

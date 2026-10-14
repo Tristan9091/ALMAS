@@ -18,6 +18,21 @@ from models import (
     Pedido as PedidoDB,
     DetallePedido as DetallePedidoDB,
     Usuario as UsuarioDB,
+    Pago as PagoDB,
+)
+from payments import crear_preferencia, ErrorMercadoPago
+from webhooks import procesar_pago_mp
+from panel import (
+    ResumenAdminType,
+    calcular_resumen,
+    PedidoAdminType,
+    PagoAdminType,
+    ClienteAdminType,
+    listar_pedidos,
+    listar_pagos,
+    listar_clientes,
+    cancelar_pedido as cancelar_pedido_admin,
+    cambiar_estado_cliente as cambiar_estado_cliente_admin,
 )
 
 
@@ -38,6 +53,7 @@ class ProductoType:
     stock: int
     categoria_id: int
     variantes: List[VarianteType]
+    activo: bool = True
 
 
 def producto_a_type(p: ProductoDB, session: Session) -> ProductoType:
@@ -53,6 +69,7 @@ def producto_a_type(p: ProductoDB, session: Session) -> ProductoType:
         stock=p.stock,
         categoria_id=p.categoria_id,
         variantes=[VarianteType(id=v.id, tipo=v.tipo, valor=v.valor) for v in variantes],
+        activo=p.activo,
     )
 
 
@@ -66,7 +83,10 @@ class CategoriaType:
     def productos(self) -> List["ProductoType"]:
         with Session(engine) as session:
             prods = session.exec(
-                select(ProductoDB).where(ProductoDB.categoria_id == self.id)
+                select(ProductoDB).where(
+                    ProductoDB.categoria_id == self.id,
+                    ProductoDB.activo == True,  # noqa: E712
+                )
             ).all()
             return [producto_a_type(p, session) for p in prods]
 
@@ -85,7 +105,8 @@ class Query:
     @strawberry.field
     def products(self, categoria_id: Optional[int] = None, limit: int = 20, offset: int = 0) -> List[ProductoType]:
         with Session(engine) as session:
-            query = select(ProductoDB)
+            # La tienda solo muestra productos activos.
+            query = select(ProductoDB).where(ProductoDB.activo == True)  # noqa: E712
             if categoria_id is not None:
                 query = query.where(ProductoDB.categoria_id == categoria_id)
             query = query.offset(offset).limit(limit)
@@ -96,9 +117,19 @@ class Query:
     def product(self, id: int) -> Optional[ProductoType]:
         with Session(engine) as session:
             p = session.get(ProductoDB, id)
-            if p is None:
+            if p is None or not p.activo:
                 return None
             return producto_a_type(p, session)
+
+    @strawberry.field
+    def productos_admin(self, info: Info) -> List[ProductoType]:
+        """Todos los productos, incluidos los desactivados. Solo admin."""
+        requerir_admin(info)
+        with Session(engine) as session:
+            productos = session.exec(
+                select(ProductoDB).order_by(ProductoDB.activo.desc(), ProductoDB.nombre)
+            ).all()
+            return [producto_a_type(p, session) for p in productos]
 
     @strawberry.field
     def categorias(self) -> List[CategoriaType]:
@@ -115,7 +146,9 @@ class Query:
             return CategoriaType(id=c.id, nombre=c.nombre, imagenUrl=c.imagen_url)
 
     @strawberry.field
-    def pedidos(self) -> List[PedidoHistorialType]:
+    def pedidos(self, info: Info) -> List[PedidoHistorialType]:
+        # Lista de TODOS los pedidos de la tienda: solo para administradores.
+        requerir_admin(info)
         with Session(engine) as session:
             peds = session.exec(select(PedidoDB)).all()
             return [
@@ -131,11 +164,54 @@ class Query:
 
         usuario = obtener_usuario_actual(info)
 
-        return UsuarioType(
-        id=usuario.id,
-        nombre=usuario.nombre,
-        email=usuario.email
-        )
+        return usuario_a_type(usuario)
+
+    @strawberry.field
+    def pedidos_admin(self, info: Info) -> List[PedidoAdminType]:
+        """Todos los pedidos con sus productos y su último pago. Solo admin."""
+        requerir_admin(info)
+        return listar_pedidos()
+
+    @strawberry.field
+    def pagos_admin(self, info: Info) -> List[PagoAdminType]:
+        """Todos los intentos de pago registrados. Solo admin."""
+        requerir_admin(info)
+        return listar_pagos()
+
+    @strawberry.field
+    def clientes_admin(self, info: Info) -> List[ClienteAdminType]:
+        """Usuarios registrados, sin contraseñas. Solo admin."""
+        requerir_admin(info)
+        return listar_clientes()
+
+    @strawberry.field
+    def resumen_admin(self, info: Info, dias: int = 30) -> ResumenAdminType:
+        """Datos del inicio del dashboard. Solo para administradores."""
+        requerir_admin(info)
+        return calcular_resumen(dias)
+
+    @strawberry.field
+    def estado_pedido(self, info: Info, pedido_id: int) -> "EstadoPagoType":
+        """Estado actual de un pedido del usuario y de su último pago."""
+        usuario = obtener_usuario_actual(info)
+
+        with Session(engine) as session:
+            pedido = session.get(PedidoDB, pedido_id)
+            if pedido is None or pedido.usuario_id != usuario.id:
+                raise ValueError("Pedido no encontrado.")
+
+            ultimo_pago = session.exec(
+                select(PagoDB)
+                .where(PagoDB.pedido_id == pedido.id)
+                .order_by(PagoDB.fecha_actualizacion.desc(), PagoDB.id.desc())
+            ).first()
+
+            return EstadoPagoType(
+                pedido_id=pedido.id,
+                estatus_pedido=pedido.estatus,
+                estado_pago=ultimo_pago.estado if ultimo_pago else None,
+                total=pedido.total,
+            )
 
 @strawberry.input
 class ProductoInput:
@@ -152,7 +228,9 @@ class DetallePedidoInput:
     producto_id: int
     variante_id: Optional[int] = None
     cantidad: int
-    precio_unitario: float
+    # Se acepta para no romper el frontend, pero el backend lo ignora:
+    # el precio real siempre se toma de la base de datos.
+    precio_unitario: Optional[float] = None
 
 
 @strawberry.input
@@ -168,6 +246,23 @@ class PedidoType:
     id: int
     nombre_comprador: str
     estatus: str
+    total: float
+
+
+@strawberry.type
+class PreferenciaPagoType:
+    pago_id: int
+    preference_id: str
+    init_point: str
+
+
+@strawberry.type
+class EstadoPagoType:
+    pedido_id: int
+    # Estado del negocio: pendiente, pagado, enviado, reembolsado.
+    estatus_pedido: str
+    # Estado según Mercado Pago: approved, pending, rejected...
+    estado_pago: Optional[str] = None
     total: float
 
 @strawberry.input
@@ -186,6 +281,17 @@ class UsuarioType:
     id: int
     nombre: str
     email: str
+    rol: str
+
+
+def usuario_a_type(usuario: UsuarioDB) -> UsuarioType:
+    # Nunca incluye password_hash: ese dato no sale del backend.
+    return UsuarioType(
+        id=usuario.id,
+        nombre=usuario.nombre,
+        email=usuario.email,
+        rol=usuario.rol,
+    )
 
 @strawberry.type
 class AuthPayload:
@@ -245,19 +351,109 @@ def obtener_usuario_actual(
         return usuario
 
 
+def requerir_admin(info: Info) -> UsuarioDB:
+    """
+    Permite continuar solo si quien hace la petición es administrador.
+
+    El rol se lee de la base de datos en cada petición (no del token),
+    así que quitarle el rol a alguien le quita el acceso de inmediato.
+    """
+    usuario = obtener_usuario_actual(info)
+
+    if usuario.rol != "admin":
+        raise ValueError("No tienes permiso para realizar esta acción.")
+
+    return usuario
+
+
+def validar_producto(data: ProductoInput, session: Session) -> dict:
+    """Revisa los datos de un producto y regresa los valores limpios."""
+    nombre = data.nombre.strip()
+    descripcion = data.descripcion.strip()
+    imagen_url = data.imagen_url.strip()
+
+    if not nombre:
+        raise ValueError("El nombre es obligatorio.")
+    if not descripcion:
+        raise ValueError("La descripción es obligatoria.")
+    if data.precio <= 0:
+        raise ValueError("El precio debe ser mayor a cero.")
+    if data.stock < 0:
+        raise ValueError("El stock no puede ser negativo.")
+    if not imagen_url.startswith(("http://", "https://")):
+        raise ValueError("La imagen debe ser una URL que empiece con http:// o https://.")
+    if session.get(CategoriaDB, data.categoria_id) is None:
+        raise ValueError("La categoría elegida no existe.")
+
+    return {
+        "nombre": nombre,
+        "descripcion": descripcion,
+        "precio": round(float(data.precio), 2),
+        "imagen_url": imagen_url,
+        "stock": int(data.stock),
+        "categoria_id": data.categoria_id,
+    }
+
+
 @strawberry.type
 class Mutation:
     @strawberry.mutation
-    def crear_producto(self, data: ProductoInput) -> ProductoType:
+    def crear_producto(self, info: Info, data: ProductoInput) -> ProductoType:
+        requerir_admin(info)
         with Session(engine) as session:
-            nuevo = ProductoDB(**data.__dict__)
+            valores = validar_producto(data, session)
+            nuevo = ProductoDB(**valores)
             session.add(nuevo)
             session.commit()
             session.refresh(nuevo)
             return producto_a_type(nuevo, session)
 
     @strawberry.mutation
-    def actualizar_stock(self, id: int, nuevo_stock: int) -> Optional[ProductoType]:
+    def actualizar_producto(self, info: Info, id: int, data: ProductoInput) -> ProductoType:
+        requerir_admin(info)
+        with Session(engine) as session:
+            producto = session.get(ProductoDB, id)
+            if producto is None:
+                raise ValueError("El producto no existe.")
+            for campo, valor in validar_producto(data, session).items():
+                setattr(producto, campo, valor)
+            session.add(producto)
+            session.commit()
+            session.refresh(producto)
+            return producto_a_type(producto, session)
+
+    @strawberry.mutation
+    def cancelar_pedido(self, info: Info, id: int) -> PedidoAdminType:
+        requerir_admin(info)
+        return cancelar_pedido_admin(id)
+
+    @strawberry.mutation
+    def cambiar_estado_cliente(self, info: Info, id: int, activo: bool) -> ClienteAdminType:
+        admin = requerir_admin(info)
+        return cambiar_estado_cliente_admin(id, activo, admin.id)
+
+    @strawberry.mutation
+    def cambiar_estado_producto(self, info: Info, id: int, activo: bool) -> ProductoType:
+        """
+        Desactivar en lugar de borrar: el producto deja de verse en la tienda,
+        pero los pedidos que ya lo incluyen conservan su información.
+        """
+        requerir_admin(info)
+        with Session(engine) as session:
+            producto = session.get(ProductoDB, id)
+            if producto is None:
+                raise ValueError("El producto no existe.")
+            producto.activo = activo
+            session.add(producto)
+            session.commit()
+            session.refresh(producto)
+            return producto_a_type(producto, session)
+
+    @strawberry.mutation
+    def actualizar_stock(self, info: Info, id: int, nuevo_stock: int) -> Optional[ProductoType]:
+        requerir_admin(info)
+        if nuevo_stock < 0:
+            raise ValueError("El stock no puede ser negativo.")
         with Session(engine) as session:
             p = session.get(ProductoDB, id)
             if p is None:
@@ -269,7 +465,8 @@ class Mutation:
             return producto_a_type(p, session)
 
     @strawberry.mutation
-    def eliminar_producto(self, id: int) -> bool:
+    def eliminar_producto(self, info: Info, id: int) -> bool:
+        requerir_admin(info)
         with Session(engine) as session:
             p = session.get(ProductoDB, id)
             if p is None:
@@ -280,9 +477,49 @@ class Mutation:
 
     @strawberry.mutation
     def crear_pedido(self, info: Info, data: PedidoInput) -> PedidoType:
+        """
+        Crea un pedido pendiente de pago.
+
+        Los precios y el stock se consultan en la base de datos; los valores
+        que manda el navegador no se usan. El inventario NO se descuenta aquí:
+        se descontará cuando Mercado Pago confirme que el pago fue aprobado.
+        """
         usuario = obtener_usuario_actual(info)
+
+        if not data.detalles:
+            raise ValueError("El pedido no tiene productos.")
+
         with Session(engine) as session:
-            total = sum(d.cantidad * d.precio_unitario for d in data.detalles)
+            renglones = []
+            cantidad_por_producto: dict[int, int] = {}
+
+            for d in data.detalles:
+                if d.cantidad <= 0:
+                    raise ValueError("Las cantidades deben ser mayores a cero.")
+
+                producto = session.get(ProductoDB, d.producto_id)
+                if producto is None or not producto.activo:
+                    raise ValueError(f"El producto {d.producto_id} ya no está disponible.")
+
+                if d.variante_id is not None:
+                    variante = session.get(VarianteDB, d.variante_id)
+                    if variante is None or variante.producto_id != producto.id:
+                        raise ValueError(
+                            f"La variante elegida no corresponde a {producto.nombre}."
+                        )
+
+                # Varias variantes del mismo producto comparten el stock.
+                cantidad_por_producto[producto.id] = (
+                    cantidad_por_producto.get(producto.id, 0) + d.cantidad
+                )
+                if cantidad_por_producto[producto.id] > producto.stock:
+                    raise ValueError(
+                        f"Solo quedan {producto.stock} piezas de {producto.nombre}."
+                    )
+
+                renglones.append((d, float(producto.precio)))
+
+            total = round(sum(d.cantidad * precio for d, precio in renglones), 2)
 
             pedido = PedidoDB(
                 nombre_comprador=data.nombre_comprador,
@@ -296,20 +533,14 @@ class Mutation:
             session.commit()
             session.refresh(pedido)
 
-            for d in data.detalles:
-                detalle = DetallePedidoDB(
+            for d, precio in renglones:
+                session.add(DetallePedidoDB(
                     pedido_id=pedido.id,
                     producto_id=d.producto_id,
                     variante_id=d.variante_id,
                     cantidad=d.cantidad,
-                    precio_unitario=d.precio_unitario,
-                )
-                session.add(detalle)
-
-                producto = session.get(ProductoDB, d.producto_id)
-                if producto:
-                    producto.stock = max(0, producto.stock - d.cantidad)
-                    session.add(producto)
+                    precio_unitario=precio,
+                ))
 
             session.commit()
 
@@ -319,6 +550,121 @@ class Mutation:
                 estatus=pedido.estatus,
                 total=pedido.total,
             )
+
+    @strawberry.mutation
+    def crear_preferencia_pago(self, info: Info, pedido_id: int) -> PreferenciaPagoType:
+        """
+        Inicia el cobro de un pedido con Mercado Pago Checkout Pro.
+
+        Regresa el init_point: el link al que el frontend debe mandar
+        al comprador para que pague.
+        """
+        usuario = obtener_usuario_actual(info)
+
+        with Session(engine) as session:
+            pedido = session.get(PedidoDB, pedido_id)
+
+            # Mismo mensaje en ambos casos para no revelar pedidos ajenos.
+            if pedido is None or pedido.usuario_id != usuario.id:
+                raise ValueError("Pedido no encontrado.")
+
+            if pedido.estatus != "pendiente":
+                raise ValueError("Este pedido ya no está pendiente de pago.")
+
+            ya_aprobado = session.exec(
+                select(PagoDB).where(
+                    PagoDB.pedido_id == pedido.id,
+                    PagoDB.estado == "approved",
+                )
+            ).first()
+            if ya_aprobado:
+                raise ValueError("Este pedido ya fue pagado.")
+
+            detalles = session.exec(
+                select(DetallePedidoDB).where(DetallePedidoDB.pedido_id == pedido.id)
+            ).all()
+            if not detalles:
+                raise ValueError("El pedido no tiene productos.")
+
+            items = []
+            for d in detalles:
+                producto = session.get(ProductoDB, d.producto_id)
+                if producto is None or not producto.activo:
+                    raise ValueError("Uno de los productos del pedido ya no está disponible.")
+                if d.cantidad > producto.stock:
+                    raise ValueError(f"Ya no hay stock suficiente de {producto.nombre}.")
+
+                titulo = producto.nombre
+                if d.variante_id is not None:
+                    variante = session.get(VarianteDB, d.variante_id)
+                    if variante:
+                        titulo = f"{producto.nombre} ({variante.tipo} {variante.valor})"
+
+                items.append({
+                    "id": producto.id,
+                    "title": titulo,
+                    "quantity": d.cantidad,
+                    "unit_price": d.precio_unitario,
+                })
+
+            try:
+                preferencia = crear_preferencia(
+                    pedido_id=pedido.id,
+                    items=items,
+                    email_comprador=pedido.email_comprador,
+                )
+            except ErrorMercadoPago as error:
+                # El detalle técnico queda en la consola del servidor;
+                # al cliente solo le llega un mensaje general.
+                print(f"[Mercado Pago] Pedido {pedido.id}: {error}")
+                raise ValueError(
+                    "No se pudo iniciar el pago con Mercado Pago. Intenta de nuevo."
+                )
+
+            pago = PagoDB(
+                pedido_id=pedido.id,
+                proveedor="mercadopago",
+                preference_id=preferencia["id"],
+                monto=pedido.total,
+                moneda="MXN",
+                estado="creado",
+            )
+            session.add(pago)
+            session.commit()
+            session.refresh(pago)
+
+            return PreferenciaPagoType(
+                pago_id=pago.id,
+                preference_id=preferencia["id"],
+                init_point=preferencia["init_point"],
+            )
+
+    @strawberry.mutation
+    def sincronizar_pago(self, info: Info, pedido_id: int, payment_id: str) -> EstadoPagoType:
+        """
+        Verifica un pago con Mercado Pago cuando el comprador regresa a la tienda.
+
+        El payment_id llega en la URL de retorno, pero no se confía en ella:
+        el estado real se consulta a Mercado Pago. Sirve en local, donde
+        los webhooks no pueden llegar, y como respaldo si un webhook se retrasa.
+        """
+        usuario = obtener_usuario_actual(info)
+
+        with Session(engine) as session:
+            pedido = session.get(PedidoDB, pedido_id)
+            if pedido is None or pedido.usuario_id != usuario.id:
+                raise ValueError("Pedido no encontrado.")
+
+        try:
+            resumen = procesar_pago_mp(payment_id, pedido_esperado=pedido_id)
+        except ErrorMercadoPago as error:
+            print(f"[Mercado Pago] Pedido {pedido_id}: {error}")
+            raise ValueError("No se pudo verificar el pago. Intenta de nuevo en unos minutos.")
+
+        if resumen is None:
+            raise ValueError("No se encontró información de este pago.")
+
+        return EstadoPagoType(**resumen)
 
     @strawberry.mutation
     def registrar_usuario(
@@ -344,18 +690,17 @@ class Mutation:
             email=data.email,
             password_hash=hash_password(
                 data.password
-            )
+            ),
+            # El registro público SIEMPRE crea clientes. RegistroInput no
+            # tiene campo "rol", así que nadie puede pedir ser admin.
+            rol="cliente",
         )
 
         session.add(usuario)
         session.commit()
         session.refresh(usuario)
 
-        return UsuarioType(
-            id=usuario.id,
-            nombre=usuario.nombre,
-            email=usuario.email
-        )
+        return usuario_a_type(usuario)
 
     @strawberry.mutation
     def login(
@@ -400,11 +745,7 @@ class Mutation:
 
         return AuthPayload(
             token=token,
-            usuario=UsuarioType(
-                id=usuario.id,
-                nombre=usuario.nombre,
-                email=usuario.email
-            )
+            usuario=usuario_a_type(usuario),
         )
 
 
