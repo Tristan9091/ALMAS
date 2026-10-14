@@ -42,6 +42,7 @@ class ProductoType:
     stock: int
     categoria_id: int
     variantes: List[VarianteType]
+    activo: bool = True
 
 
 def producto_a_type(p: ProductoDB, session: Session) -> ProductoType:
@@ -57,6 +58,7 @@ def producto_a_type(p: ProductoDB, session: Session) -> ProductoType:
         stock=p.stock,
         categoria_id=p.categoria_id,
         variantes=[VarianteType(id=v.id, tipo=v.tipo, valor=v.valor) for v in variantes],
+        activo=p.activo,
     )
 
 
@@ -70,7 +72,10 @@ class CategoriaType:
     def productos(self) -> List["ProductoType"]:
         with Session(engine) as session:
             prods = session.exec(
-                select(ProductoDB).where(ProductoDB.categoria_id == self.id)
+                select(ProductoDB).where(
+                    ProductoDB.categoria_id == self.id,
+                    ProductoDB.activo == True,  # noqa: E712
+                )
             ).all()
             return [producto_a_type(p, session) for p in prods]
 
@@ -89,7 +94,8 @@ class Query:
     @strawberry.field
     def products(self, categoria_id: Optional[int] = None, limit: int = 20, offset: int = 0) -> List[ProductoType]:
         with Session(engine) as session:
-            query = select(ProductoDB)
+            # La tienda solo muestra productos activos.
+            query = select(ProductoDB).where(ProductoDB.activo == True)  # noqa: E712
             if categoria_id is not None:
                 query = query.where(ProductoDB.categoria_id == categoria_id)
             query = query.offset(offset).limit(limit)
@@ -100,9 +106,19 @@ class Query:
     def product(self, id: int) -> Optional[ProductoType]:
         with Session(engine) as session:
             p = session.get(ProductoDB, id)
-            if p is None:
+            if p is None or not p.activo:
                 return None
             return producto_a_type(p, session)
+
+    @strawberry.field
+    def productos_admin(self, info: Info) -> List[ProductoType]:
+        """Todos los productos, incluidos los desactivados. Solo admin."""
+        requerir_admin(info)
+        with Session(engine) as session:
+            productos = session.exec(
+                select(ProductoDB).order_by(ProductoDB.activo.desc(), ProductoDB.nombre)
+            ).all()
+            return [producto_a_type(p, session) for p in productos]
 
     @strawberry.field
     def categorias(self) -> List[CategoriaType]:
@@ -321,17 +337,78 @@ def requerir_admin(info: Info) -> UsuarioDB:
     return usuario
 
 
+def validar_producto(data: ProductoInput, session: Session) -> dict:
+    """Revisa los datos de un producto y regresa los valores limpios."""
+    nombre = data.nombre.strip()
+    descripcion = data.descripcion.strip()
+    imagen_url = data.imagen_url.strip()
+
+    if not nombre:
+        raise ValueError("El nombre es obligatorio.")
+    if not descripcion:
+        raise ValueError("La descripción es obligatoria.")
+    if data.precio <= 0:
+        raise ValueError("El precio debe ser mayor a cero.")
+    if data.stock < 0:
+        raise ValueError("El stock no puede ser negativo.")
+    if not imagen_url.startswith(("http://", "https://")):
+        raise ValueError("La imagen debe ser una URL que empiece con http:// o https://.")
+    if session.get(CategoriaDB, data.categoria_id) is None:
+        raise ValueError("La categoría elegida no existe.")
+
+    return {
+        "nombre": nombre,
+        "descripcion": descripcion,
+        "precio": round(float(data.precio), 2),
+        "imagen_url": imagen_url,
+        "stock": int(data.stock),
+        "categoria_id": data.categoria_id,
+    }
+
+
 @strawberry.type
 class Mutation:
     @strawberry.mutation
     def crear_producto(self, info: Info, data: ProductoInput) -> ProductoType:
         requerir_admin(info)
         with Session(engine) as session:
-            nuevo = ProductoDB(**data.__dict__)
+            valores = validar_producto(data, session)
+            nuevo = ProductoDB(**valores)
             session.add(nuevo)
             session.commit()
             session.refresh(nuevo)
             return producto_a_type(nuevo, session)
+
+    @strawberry.mutation
+    def actualizar_producto(self, info: Info, id: int, data: ProductoInput) -> ProductoType:
+        requerir_admin(info)
+        with Session(engine) as session:
+            producto = session.get(ProductoDB, id)
+            if producto is None:
+                raise ValueError("El producto no existe.")
+            for campo, valor in validar_producto(data, session).items():
+                setattr(producto, campo, valor)
+            session.add(producto)
+            session.commit()
+            session.refresh(producto)
+            return producto_a_type(producto, session)
+
+    @strawberry.mutation
+    def cambiar_estado_producto(self, info: Info, id: int, activo: bool) -> ProductoType:
+        """
+        Desactivar en lugar de borrar: el producto deja de verse en la tienda,
+        pero los pedidos que ya lo incluyen conservan su información.
+        """
+        requerir_admin(info)
+        with Session(engine) as session:
+            producto = session.get(ProductoDB, id)
+            if producto is None:
+                raise ValueError("El producto no existe.")
+            producto.activo = activo
+            session.add(producto)
+            session.commit()
+            session.refresh(producto)
+            return producto_a_type(producto, session)
 
     @strawberry.mutation
     def actualizar_stock(self, info: Info, id: int, nuevo_stock: int) -> Optional[ProductoType]:
@@ -382,8 +459,8 @@ class Mutation:
                     raise ValueError("Las cantidades deben ser mayores a cero.")
 
                 producto = session.get(ProductoDB, d.producto_id)
-                if producto is None:
-                    raise ValueError(f"El producto {d.producto_id} ya no existe.")
+                if producto is None or not producto.activo:
+                    raise ValueError(f"El producto {d.producto_id} ya no está disponible.")
 
                 if d.variante_id is not None:
                     variante = session.get(VarianteDB, d.variante_id)
@@ -473,8 +550,8 @@ class Mutation:
             items = []
             for d in detalles:
                 producto = session.get(ProductoDB, d.producto_id)
-                if producto is None:
-                    raise ValueError("Uno de los productos del pedido ya no existe.")
+                if producto is None or not producto.activo:
+                    raise ValueError("Uno de los productos del pedido ya no está disponible.")
                 if d.cantidad > producto.stock:
                     raise ValueError(f"Ya no hay stock suficiente de {producto.nombre}.")
 
