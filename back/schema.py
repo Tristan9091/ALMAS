@@ -22,7 +22,18 @@ from models import (
 )
 from payments import crear_preferencia, ErrorMercadoPago
 from webhooks import procesar_pago_mp
-from panel import ResumenAdminType, calcular_resumen
+from panel import (
+    ResumenAdminType,
+    calcular_resumen,
+    PedidoAdminType,
+    PagoAdminType,
+    ClienteAdminType,
+    listar_pedidos,
+    listar_pagos,
+    listar_clientes,
+    cancelar_pedido as cancelar_pedido_admin,
+    cambiar_estado_cliente as cambiar_estado_cliente_admin,
+)
 
 
 @strawberry.type
@@ -154,6 +165,24 @@ class Query:
         usuario = obtener_usuario_actual(info)
 
         return usuario_a_type(usuario)
+
+    @strawberry.field
+    def pedidos_admin(self, info: Info) -> List[PedidoAdminType]:
+        """Todos los pedidos con sus productos y su último pago. Solo admin."""
+        requerir_admin(info)
+        return listar_pedidos()
+
+    @strawberry.field
+    def pagos_admin(self, info: Info) -> List[PagoAdminType]:
+        """Todos los intentos de pago registrados. Solo admin."""
+        requerir_admin(info)
+        return listar_pagos()
+
+    @strawberry.field
+    def clientes_admin(self, info: Info) -> List[ClienteAdminType]:
+        """Usuarios registrados, sin contraseñas. Solo admin."""
+        requerir_admin(info)
+        return listar_clientes()
 
     @strawberry.field
     def resumen_admin(self, info: Info, dias: int = 30) -> ResumenAdminType:
@@ -392,6 +421,16 @@ class Mutation:
             session.commit()
             session.refresh(producto)
             return producto_a_type(producto, session)
+
+    @strawberry.mutation
+    def cancelar_pedido(self, info: Info, id: int) -> PedidoAdminType:
+        requerir_admin(info)
+        return cancelar_pedido_admin(id)
+
+    @strawberry.mutation
+    def cambiar_estado_cliente(self, info: Info, id: int, activo: bool) -> ClienteAdminType:
+        admin = requerir_admin(info)
+        return cambiar_estado_cliente_admin(id, activo, admin.id)
 
     @strawberry.mutation
     def cambiar_estado_producto(self, info: Info, id: int, activo: bool) -> ProductoType:
