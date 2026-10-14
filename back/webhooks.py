@@ -100,7 +100,13 @@ def procesar_pago_mp(payment_id: str, pedido_esperado: Optional[int] = None) -> 
                     session.add(producto)
                 pago.inventario_aplicado = True
 
-            if pedido.estatus == "pendiente":
+            if pedido.estatus == "cancelado":
+                # El admin canceló el pedido, pero el cliente ya tenía abierta
+                # la página de Mercado Pago y pagó. El dinero sí llegó, así que
+                # el pedido se reactiva como pagado.
+                print(f"[Webhook] Pedido {pedido.id} estaba cancelado pero se pagó; se reactiva.")
+
+            if pedido.estatus in ("pendiente", "cancelado"):
                 pedido.estatus = "pagado"
                 session.add(pedido)
 

@@ -12,7 +12,7 @@ import strawberry
 from sqlmodel import Session, select
 
 from database import engine
-from models import Pedido, Pago, Producto
+from models import DetallePedido, Pedido, Pago, Producto, Usuario, Variante
 
 # Estados de pedido cuyo pago ya fue confirmado por Mercado Pago.
 # Solo estos cuentan como ventas.
@@ -151,3 +151,187 @@ def calcular_resumen(dias: int = 30, limite_recientes: int = 8) -> ResumenAdminT
                 for p in recientes
             ],
         )
+
+
+# ============================================================
+#  Pedidos, pagos y clientes (pestañas del panel)
+# ============================================================
+
+def _utc(fecha: datetime) -> datetime:
+    """Marca la fecha como UTC para que el navegador la muestre en su hora."""
+    return fecha.replace(tzinfo=timezone.utc)
+
+
+@strawberry.type
+class DetallePedidoAdminType:
+    producto: str
+    variante: Optional[str]
+    cantidad: int
+    precio_unitario: float
+    subtotal: float
+
+
+@strawberry.type
+class PedidoAdminType:
+    id: int
+    cliente: str
+    email: str
+    direccion: str
+    fecha: datetime
+    total: float
+    estatus: str
+    estado_pago: Optional[str]
+    payment_id: Optional[str]
+    detalles: List[DetallePedidoAdminType]
+
+
+@strawberry.type
+class PagoAdminType:
+    id: int
+    pedido_id: int
+    cliente: str
+    email: str
+    monto: float
+    moneda: str
+    estado: str
+    estado_detalle: Optional[str]
+    payment_id: Optional[str]
+    fecha: datetime
+
+
+@strawberry.type
+class ClienteAdminType:
+    id: int
+    nombre: str
+    email: str
+    rol: str
+    activo: bool
+    num_pedidos: int
+    total_comprado: float
+    ultimo_pedido: Optional[datetime]
+
+
+def listar_pedidos() -> List[PedidoAdminType]:
+    with Session(engine) as session:
+        pedidos = session.exec(select(Pedido).order_by(Pedido.fecha.desc())).all()
+        productos = {p.id: p.nombre for p in session.exec(select(Producto)).all()}
+        variantes = {v.id: f"{v.tipo} {v.valor}" for v in session.exec(select(Variante)).all()}
+
+        detalles_por_pedido: dict[int, list] = {}
+        for d in session.exec(select(DetallePedido)).all():
+            detalles_por_pedido.setdefault(d.pedido_id, []).append(d)
+
+        # El pago más reciente de cada pedido (si tiene).
+        ultimo_pago: dict[int, Pago] = {}
+        for pago in session.exec(select(Pago).order_by(Pago.fecha_actualizacion, Pago.id)).all():
+            ultimo_pago[pago.pedido_id] = pago
+
+        resultado = []
+        for p in pedidos:
+            pago = ultimo_pago.get(p.id)
+            resultado.append(PedidoAdminType(
+                id=p.id,
+                cliente=p.nombre_comprador,
+                email=p.email_comprador,
+                direccion=p.direccion_envio,
+                fecha=_utc(p.fecha),
+                total=p.total,
+                estatus=p.estatus,
+                estado_pago=pago.estado if pago else None,
+                payment_id=pago.payment_id if pago else None,
+                detalles=[
+                    DetallePedidoAdminType(
+                        producto=productos.get(d.producto_id, f"Producto {d.producto_id}"),
+                        variante=variantes.get(d.variante_id) if d.variante_id else None,
+                        cantidad=d.cantidad,
+                        precio_unitario=d.precio_unitario,
+                        subtotal=round(d.cantidad * d.precio_unitario, 2),
+                    )
+                    for d in detalles_por_pedido.get(p.id, [])
+                ],
+            ))
+        return resultado
+
+
+def cancelar_pedido(pedido_id: int) -> PedidoAdminType:
+    """
+    Solo se cancelan pedidos PENDIENTES de pago. Un pedido pagado ya se
+    cobró: cancelarlo requeriría devolver el dinero en Mercado Pago.
+    Como un pedido pendiente nunca descontó inventario, no hay stock que regresar.
+    """
+    with Session(engine) as session:
+        pedido = session.get(Pedido, pedido_id)
+        if pedido is None:
+            raise ValueError("El pedido no existe.")
+        if pedido.estatus != "pendiente":
+            raise ValueError("Solo se pueden cancelar pedidos pendientes de pago.")
+        pedido.estatus = "cancelado"
+        session.add(pedido)
+        session.commit()
+
+    return next(p for p in listar_pedidos() if p.id == pedido_id)
+
+
+def listar_pagos() -> List[PagoAdminType]:
+    with Session(engine) as session:
+        pagos = session.exec(select(Pago).order_by(Pago.fecha_actualizacion.desc(), Pago.id.desc())).all()
+        pedidos = {p.id: p for p in session.exec(select(Pedido)).all()}
+        return [
+            PagoAdminType(
+                id=pago.id,
+                pedido_id=pago.pedido_id,
+                cliente=pedidos[pago.pedido_id].nombre_comprador if pago.pedido_id in pedidos else "—",
+                email=pedidos[pago.pedido_id].email_comprador if pago.pedido_id in pedidos else "",
+                monto=pago.monto,
+                moneda=pago.moneda,
+                estado=pago.estado,
+                estado_detalle=pago.estado_detalle,
+                payment_id=pago.payment_id,
+                fecha=_utc(pago.fecha_actualizacion),
+            )
+            for pago in pagos
+        ]
+
+
+def listar_clientes() -> List[ClienteAdminType]:
+    # Nunca se consulta ni se regresa password_hash.
+    with Session(engine) as session:
+        usuarios = session.exec(select(Usuario).order_by(Usuario.nombre)).all()
+        pedidos = session.exec(select(Pedido)).all()
+
+        resultado = []
+        for u in usuarios:
+            suyos = [p for p in pedidos if p.usuario_id == u.id]
+            resultado.append(ClienteAdminType(
+                id=u.id,
+                nombre=u.nombre,
+                email=u.email,
+                rol=u.rol,
+                activo=u.activo,
+                num_pedidos=len(suyos),
+                total_comprado=round(sum(p.total for p in suyos if p.estatus in ESTADOS_PAGADOS), 2),
+                ultimo_pedido=_utc(max(p.fecha for p in suyos)) if suyos else None,
+            ))
+        return resultado
+
+
+def cambiar_estado_cliente(usuario_id: int, activo: bool, admin_id: int) -> ClienteAdminType:
+    """
+    Desactivar una cuenta le impide iniciar sesión y comprar; sus pedidos
+    se conservan. Solo aplica a clientes: un admin no puede desactivarse
+    a sí mismo ni a otro admin desde el panel.
+    """
+    if usuario_id == admin_id:
+        raise ValueError("No puedes desactivar tu propia cuenta.")
+
+    with Session(engine) as session:
+        usuario = session.get(Usuario, usuario_id)
+        if usuario is None:
+            raise ValueError("El usuario no existe.")
+        if usuario.rol != "cliente":
+            raise ValueError("Solo se pueden activar o desactivar cuentas de clientes.")
+        usuario.activo = activo
+        session.add(usuario)
+        session.commit()
+
+    return next(c for c in listar_clientes() if c.id == usuario_id)
