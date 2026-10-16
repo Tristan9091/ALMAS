@@ -1,13 +1,50 @@
 # back/database.py
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+from contextlib import contextmanager
 
 from sqlalchemy import inspect, text
 from sqlmodel import SQLModel, create_engine, Session
 
-DATABASE_URL = "sqlite:///./db.sqlite3"
-engine = create_engine(DATABASE_URL, echo=False)
+BASE_DIR = Path(__file__).resolve().parent
+
+DB_PATH = Path(
+    os.getenv("ALMAS_DB_PATH", str(BASE_DIR / "db.sqlite3"))
+).expanduser().resolve()
+
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+DATABASE_URL = f"sqlite:///{DB_PATH.as_posix()}"
+
+engine = create_engine(
+    DATABASE_URL,
+    echo=False,
+    connect_args={"timeout": 30},
+)
+
+
+@contextmanager
+def transaccion_pago():
+    """
+    Bloquea las escrituras de SQLite mientras se comprueban
+    y actualizan los datos de un pago.
+
+    Funciona entre procesos que compartan el mismo archivo SQLite.
+    """
+    with engine.connect() as conexion:
+        conexion.exec_driver_sql("BEGIN IMMEDIATE")
+
+        with Session(bind=conexion) as session:
+            try:
+                yield session
+                session.flush()
+                conexion.commit()
+            except Exception:
+                conexion.rollback()
+                raise
+
 
 
 # Columnas agregadas después de que la base ya tenía datos.

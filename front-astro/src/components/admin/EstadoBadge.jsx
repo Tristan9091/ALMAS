@@ -9,6 +9,38 @@ const ESTADOS_PEDIDO = {
   entregado: { texto: "Entregado", tono: "bien", icono: "✓✓" },
   reembolsado: { texto: "Reembolsado", tono: "critico", icono: "↺" },
   cancelado: { texto: "Cancelado", tono: "critico", icono: "✕" },
+
+  // Se recibió o detectó un cobro que requiere revisión administrativa.
+  incidencia_stock: {
+    texto: "Incidencia de inventario",
+    tono: "critico",
+    icono: "!",
+  },
+  incidencia_monto: {
+    texto: "Diferencia en cobro",
+    tono: "critico",
+    icono: "!",
+  },
+  incidencia_duplicado: {
+    texto: "Posible cobro duplicado",
+    tono: "critico",
+    icono: "!",
+  },
+  incidencia_cancelado: {
+    texto: "Cobro de pedido cancelado",
+    tono: "critico",
+    icono: "!",
+  },
+  incidencia_sin_intento: {
+    texto: "Pago sin intento registrado",
+    tono: "critico",
+    icono: "!",
+  },
+  incidencia_tardia: {
+    texto: "Cobro detectado tardíamente",
+    tono: "critico",
+    icono: "!",
+  },
 };
 
 const ESTADOS_PAGO = {
@@ -21,6 +53,10 @@ const ESTADOS_PAGO = {
   refunded: { texto: "Reembolsado", tono: "critico", icono: "↺" },
   charged_back: { texto: "Contracargo", tono: "critico", icono: "!" },
   creado: { texto: "Sin completar", tono: "neutro", icono: "…" },
+
+  // Estados internos del proceso de reserva y cobro.
+  enviando: { texto: "Enviando pago", tono: "aviso", icono: "◷" },
+  verificacion: { texto: "Requiere verificación", tono: "critico", icono: "!" },
 };
 
 export default function EstadoBadge({ estado, tipo = "pedido" }) {

@@ -1,43 +1,37 @@
 """
-webhooks.py — Aplica el resultado de un cobro y recibe avisos de Mercado Pago.
+webhooks.py — Registra los resultados de las órdenes de Mercado Pago.
 
-aplicar_orden() es el ÚNICO lugar que cambia pedidos, pagos e inventario
-según lo que diga Mercado Pago. La usan:
-  - la mutación pagarPedido, con la respuesta inmediata del cobro, y
-  - el webhook, cuando Mercado Pago avisa después que una orden cambió
-    (por ejemplo, un reembolso o un pago que estaba en revisión).
+aplicar_orden() centraliza los cambios de pedidos, pagos e inventario.
+Se usa tanto en la respuesta directa del checkout como en los webhooks
+(y en la conciliación administrativa).
 """
 
-import threading
 from typing import Optional
 
 from fastapi import APIRouter, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from sqlmodel import Session, select
 
-from database import engine
-from models import Pedido, DetallePedido, Producto, Pago, ahora
+from database import transaccion_pago
+from models import DetallePedido, Pago, Pedido, Producto, ahora
 from payments import ErrorMercadoPago, obtener_orden, validar_firma_webhook
 
 router = APIRouter()
 
-# La respuesta del cobro y el aviso del webhook pueden llegar casi al mismo
-# tiempo. El candado hace que se procesen uno por uno, para no descontar
-# el inventario dos veces.
-_candado = threading.Lock()
+
+# Estados del pedido que representan una venta ya reconocida.
+ESTADOS_VENTA = {"pagado", "en_preparacion", "enviado", "entregado"}
+ESTADOS_FINALIZADOS = ESTADOS_VENTA | {"reembolsado"}
 
 
 def estado_interno(orden: dict) -> str:
-    """
-    Traduce el estado de una orden de Mercado Pago a los estados que usa
-    la tabla Pago (y que ya entiende el panel de administración).
-    """
+    """Traduce el estado de Mercado Pago al estado interno del intento."""
     status = orden.get("status")
     detalle = orden.get("status_detail")
 
     if status == "refunded" or detalle == "refunded":
         return "refunded"
-    if detalle == "charged_back":
+    if status == "charged_back" or detalle == "charged_back":
         return "charged_back"
     if status == "processed":
         return "approved"
@@ -53,8 +47,9 @@ def estado_interno(orden: dict) -> str:
 
 
 def _primer_pago(orden: dict) -> dict:
-    pagos = (orden.get("transactions") or {}).get("payments") or []
-    return pagos[0] if pagos else {}
+    transacciones = orden.get("transactions") or {}
+    pagos = transacciones.get("payments") or []
+    return pagos[0] if pagos and isinstance(pagos[0], dict) else {}
 
 
 def _a_numero(valor) -> float | None:
@@ -65,15 +60,13 @@ def _a_numero(valor) -> float | None:
 
 
 def _monto(orden: dict, estado: str) -> float:
-    """
-    Si se aprobó: lo que REALMENTE se cobró (para comparar con el pedido).
-    Si no: lo que se intentó cobrar (para que el panel muestre el intento).
-    """
+    """Prioriza el monto efectivamente pagado si hubo aprobación."""
     pago = _primer_pago(orden)
     if estado == "approved":
         candidatos = (orden.get("total_paid_amount"), pago.get("paid_amount"))
     else:
         candidatos = (orden.get("total_amount"), pago.get("amount"))
+
     for valor in candidatos:
         numero = _a_numero(valor)
         if numero is not None:
@@ -81,21 +74,130 @@ def _monto(orden: dict, estado: str) -> float:
     return 0.0
 
 
-def aplicar_orden(orden: dict, pedido_esperado: Optional[int] = None) -> Optional[dict]:
+def _cantidades_pedido(session: Session, pedido_id: int) -> dict[int, int]:
+    """Agrupa unidades por producto, aunque aparezca en varias variantes."""
+    detalles = session.exec(
+        select(DetallePedido).where(DetallePedido.pedido_id == pedido_id)
+    ).all()
+    cantidades: dict[int, int] = {}
+    for detalle in detalles:
+        if detalle.cantidad <= 0:
+            raise ValueError(f"Cantidad inválida en el pedido {pedido_id}.")
+        cantidades[detalle.producto_id] = (
+            cantidades.get(detalle.producto_id, 0) + detalle.cantidad
+        )
+    return cantidades
+
+
+def _devolver_stock(session: Session, pedido_id: int) -> None:
+    """Devuelve una reserva; si falta un producto, aborta toda la transacción."""
+    cantidades = _cantidades_pedido(session, pedido_id)
+    if not cantidades:
+        raise ValueError(f"El pedido {pedido_id} no tiene productos para devolver.")
+
+    for producto_id, cantidad in cantidades.items():
+        producto = session.get(Producto, producto_id)
+        if producto is None:
+            raise ValueError(
+                f"No existe el producto {producto_id}; no se puede devolver stock."
+            )
+        producto.stock += cantidad
+        session.add(producto)
+
+
+def liberar_reserva(intento_id: int, revision_admin: bool = False) -> bool:
     """
-    Guarda el resultado de una orden y, si se aprobó, confirma el pedido y
-    descuenta el inventario UNA sola vez. Se puede llamar varias veces con
-    la misma orden sin efectos duplicados.
+    Revierte una reserva cuando la solicitud NO llegó al proveedor, o cuando
+    un administrador verificó por separado que no hubo cobro.
+
+    Nunca libera una reserva vinculada a una orden conocida. En los casos
+    inciertos, la verificación humana es imprescindible.
     """
-    order_id = str(orden.get("id") or "")
-    referencia = str(orden.get("external_reference") or "")
-    if not order_id or not referencia.isdigit():
-        print(f"[Pagos] Orden {order_id or '?'} sin referencia de pedido; se ignora.")
+    with transaccion_pago() as session:
+        pago = session.get(Pago, intento_id)
+        estado_permitido = "verificacion" if revision_admin else "enviando"
+
+        if (
+            pago is None
+            or pago.estado != estado_permitido
+            or pago.order_id is not None
+        ):
+            raise ValueError("Este intento no se puede liberar automáticamente.")
+
+        pedido = session.get(Pedido, pago.pedido_id)
+        if pedido is None or pedido.estatus != "pendiente":
+            raise ValueError("El pedido ya no permite liberar la reserva.")
+
+        if pago.inventario_aplicado:
+            _devolver_stock(session, pago.pedido_id)
+            pago.inventario_aplicado = False
+
+        pago.estado = "cancelled" if revision_admin else "rejected"
+        pago.estado_detalle = (
+            "sin_cobro_verificado_por_admin"
+            if revision_admin
+            else "error_sin_orden"
+        )
+        pago.fecha_actualizacion = ahora()
+        session.add(pago)
+        return True
+
+
+def marcar_pago_incierto(intento_id: int) -> None:
+    """Conserva la reserva cuando no sabemos si Mercado Pago cobró."""
+    with transaccion_pago() as session:
+        pago = session.get(Pago, intento_id)
+        if pago is not None and pago.estado == "enviando":
+            pago.estado = "verificacion"
+            pago.estado_detalle = "resultado_desconocido"
+            pago.fecha_actualizacion = ahora()
+            session.add(pago)
+
+
+def _resumen_orden(pedido: Pedido, pago: Pago) -> dict:
+    return {
+        "pedido_id": pedido.id,
+        "estatus_pedido": pedido.estatus,
+        "estado_pago": pago.estado,
+        "estado_detalle": pago.estado_detalle,
+        "total": pedido.total,
+    }
+
+
+def _referencia_pedido(referencia: str) -> tuple[int, Optional[int]]:
+    """Admite 'pedido_intento' y la referencia antigua 'pedido'."""
+    partes = referencia.split("_")
+    if len(partes) == 2 and all(p.isdigit() for p in partes):
+        pedido_id, intento_id = map(int, partes)
+    elif referencia.isdigit():
+        pedido_id, intento_id = int(referencia), None
+    else:
+        raise ValueError("Referencia de Mercado Pago inválida.")
+
+    if pedido_id <= 0 or (intento_id is not None and intento_id <= 0):
+        raise ValueError("La referencia contiene identificadores inválidos.")
+    return pedido_id, intento_id
+
+
+def aplicar_orden(
+    orden: dict,
+    pedido_esperado: Optional[int] = None,
+) -> Optional[dict]:
+    """Sincroniza una orden verificada con la base de datos (transacción única)."""
+    order_id = str(orden.get("id") or "").strip()
+    referencia = str(orden.get("external_reference") or "").strip()
+    if not order_id:
+        print("[Pagos] Orden sin identificador.")
         return None
-    pedido_id = int(referencia)
+
+    try:
+        pedido_id, intento_id = _referencia_pedido(referencia)
+    except ValueError as error:
+        print(f"[Pagos] Orden {order_id}: {error}")
+        return None
 
     if pedido_esperado is not None and pedido_id != pedido_esperado:
-        raise ValueError("El pago no corresponde a este pedido.")
+        raise ValueError("La orden no corresponde al pedido solicitado.")
 
     estado = estado_interno(orden)
     pago_mp = _primer_pago(orden)
@@ -104,17 +206,61 @@ def aplicar_orden(orden: dict, pedido_esperado: Optional[int] = None) -> Optiona
     moneda = orden.get("currency_id") or "MXN"
     monto = _monto(orden, estado)
 
-    with _candado, Session(engine) as session:
+    with transaccion_pago() as session:
         pedido = session.get(Pedido, pedido_id)
         if pedido is None:
-            print(f"[Pagos] Orden {order_id}: el pedido {pedido_id} no existe.")
-            return None
+            raise ValueError(f"No existe el pedido {pedido_id} de la orden {order_id}.")
 
-        # 1. Un registro de Pago por orden (cada intento de cobro es una orden).
+        # Una orden existente siempre conserva el mismo registro de pago.
         pago = session.exec(select(Pago).where(Pago.order_id == order_id)).first()
-        if pago is None:
-            pago = Pago(pedido_id=pedido.id, order_id=order_id, monto=monto, moneda=moneda)
 
+        if pago is not None and intento_id is not None and pago.id != intento_id:
+            raise ValueError("La referencia no coincide con el intento registrado.")
+
+        if pago is None and intento_id is not None:
+            pago = session.get(Pago, intento_id)
+            if pago is None:
+                # No crear un pago asociado a un intento desconocido.
+                raise ValueError(
+                    f"La orden {order_id} señala un intento inexistente: {intento_id}."
+                )
+
+        if pago is None and intento_id is None:
+            # Compatibilidad con las órdenes creadas antes de tener intento_id.
+            pago = session.exec(
+                select(Pago)
+                .where(
+                    Pago.pedido_id == pedido.id,
+                    Pago.order_id.is_(None),
+                    Pago.estado.in_(["enviando", "verificacion"]),
+                )
+                .order_by(Pago.id.desc())
+            ).first()
+
+        if pago is None:
+            pago = Pago(pedido_id=pedido.id, monto=monto, moneda=moneda)
+
+        if pago.pedido_id != pedido.id:
+            raise ValueError("El intento de pago pertenece a otro pedido.")
+        if pago.order_id is not None and pago.order_id != order_id:
+            raise ValueError("El intento ya está asociado a otra orden.")
+
+        estado_previo = pago.estado
+        detalle_previo = pago.estado_detalle
+
+        # Una orden aprobada no retrocede por notificaciones retrasadas.
+        if estado_previo == "approved" and estado in {
+            "approved", "creado", "pending", "in_process", "rejected", "cancelled"
+        }:
+            return _resumen_orden(pedido, pago)
+        if estado_previo in ("refunded", "charged_back"):
+            return _resumen_orden(pedido, pago)
+        if estado_previo in ("rejected", "cancelled") and estado in {
+            "creado", "pending", "in_process"
+        }:
+            return _resumen_orden(pedido, pago)
+
+        pago.order_id = order_id
         if payment_id:
             pago.payment_id = str(payment_id)
         pago.estado = estado
@@ -123,75 +269,108 @@ def aplicar_orden(orden: dict, pedido_esperado: Optional[int] = None) -> Optiona
         pago.moneda = moneda
         pago.fecha_actualizacion = ahora()
         session.add(pago)
+        session.flush()
 
-        # 2. Confirmar el pedido solo si se cobró exactamente lo que vale.
         monto_correcto = moneda == "MXN" and abs(monto - pedido.total) < 0.01
 
-        if estado == "approved" and not monto_correcto:
-            print(
-                f"[Pagos] ALERTA pedido {pedido.id}: se cobraron {monto} {moneda} "
-                f"pero el pedido vale {pedido.total} MXN. No se confirma."
+        if estado == "approved":
+            liberado_anteriormente = (
+                detalle_previo in {
+                    "sin_cobro_verificado_por_admin", "error_sin_orden"
+                }
+                or estado_previo in {"rejected", "cancelled"}
             )
 
-        elif estado == "approved":
-            inventario_ya_descontado = session.exec(
+            otro_aplicado = session.exec(
                 select(Pago).where(
                     Pago.pedido_id == pedido.id,
+                    Pago.id != pago.id,
                     Pago.inventario_aplicado == True,  # noqa: E712
                 )
             ).first()
 
-            if not inventario_ya_descontado:
-                detalles = session.exec(
-                    select(DetallePedido).where(DetallePedido.pedido_id == pedido.id)
-                ).all()
-                for detalle in detalles:
-                    producto = session.get(Producto, detalle.producto_id)
-                    if producto is None:
-                        continue
-                    if producto.stock < detalle.cantidad:
-                        print(
-                            f"[Pagos] ALERTA pedido {pedido.id}: se vendieron "
-                            f"{detalle.cantidad} de {producto.nombre} y solo había {producto.stock}."
-                        )
-                    producto.stock = max(0, producto.stock - detalle.cantidad)
-                    session.add(producto)
-                pago.inventario_aplicado = True
+            if liberado_anteriormente:
+                pedido.estatus = "incidencia_tardia"
+            elif otro_aplicado is not None:
+                pedido.estatus = "incidencia_duplicado"
+            elif pedido.estatus in ESTADOS_FINALIZADOS and not pago.inventario_aplicado:
+                pedido.estatus = "incidencia_duplicado"
+            elif pedido.estatus == "cancelado":
+                pedido.estatus = "incidencia_cancelado"
+            elif not monto_correcto:
+                pedido.estatus = "incidencia_monto"
+            elif pedido.estatus.startswith("incidencia_"):
+                # Mantener las incidencias abiertas hasta revisión administrativa.
+                pass
+            elif pago.inventario_aplicado:
+                # El stock ya fue reservado. No descontar nuevamente.
+                if pedido.estatus == "pendiente":
+                    pedido.estatus = "pagado"
+            else:
+                # Compatibilidad con cobros anteriores al sistema de reservas.
+                cantidades = _cantidades_pedido(session, pedido.id)
+                productos = {}
+                disponible = bool(cantidades)
 
-            if pedido.estatus == "cancelado":
-                # El admin lo canceló mientras se cobraba; el dinero sí llegó.
-                print(f"[Pagos] Pedido {pedido.id} estaba cancelado pero se pagó; se reactiva.")
+                for producto_id, cantidad in cantidades.items():
+                    producto = session.get(Producto, producto_id)
+                    if producto is None or producto.stock < cantidad:
+                        disponible = False
+                    else:
+                        productos[producto_id] = producto
 
-            if pedido.estatus in ("pendiente", "cancelado"):
-                pedido.estatus = "pagado"
-                session.add(pedido)
+                if not disponible:
+                    pedido.estatus = "incidencia_stock"
+                else:
+                    for producto_id, cantidad in cantidades.items():
+                        producto = productos[producto_id]
+                        producto.stock -= cantidad
+                        session.add(producto)
+                    pago.inventario_aplicado = True
+                    pedido.estatus = "pagado"
 
-        elif estado in ("refunded", "charged_back") and pedido.estatus == "pagado":
-            pedido.estatus = "reembolsado"
             session.add(pedido)
+            session.add(pago)
+            if pedido.estatus.startswith("incidencia_"):
+                print(
+                    f"[Pagos] INCIDENCIA pedido {pedido.id}: "
+                    f"{pedido.estatus}; orden {order_id}"
+                )
 
-        # Un cobro rechazado no cambia el pedido: sigue pendiente y el
-        # cliente puede intentar con otra tarjeta.
-        session.commit()
+        elif estado in ("rejected", "cancelled"):
+            if pago.inventario_aplicado and pedido.estatus == "pendiente":
+                _devolver_stock(session, pedido.id)
+                pago.inventario_aplicado = False
+                session.add(pago)
 
-        return {
-            "pedido_id": pedido.id,
-            "estatus_pedido": pedido.estatus,
-            "estado_pago": pago.estado,
-            "estado_detalle": pago.estado_detalle,
-            "total": pedido.total,
-        }
+        elif estado in ("refunded", "charged_back"):
+            if pedido.estatus == "pendiente" and pago.inventario_aplicado:
+                # Reserva de una orden nunca consolidada como venta.
+                _devolver_stock(session, pedido.id)
+                pago.inventario_aplicado = False
+                session.add(pago)
+                pedido.estatus = "reembolsado"
+                session.add(pedido)
+            elif pedido.estatus in ESTADOS_VENTA:
+                # No regresar automáticamente mercancía vendida/enviada.
+                pedido.estatus = "reembolsado"
+                session.add(pedido)
+            # Una incidencia abierta no se cierra automáticamente.
+
+        return _resumen_orden(pedido, pago)
 
 
 def procesar_orden_mp(order_id: str) -> Optional[dict]:
-    """Consulta la orden en Mercado Pago (nunca se confía en el aviso) y la aplica."""
-    return aplicar_orden(obtener_orden(order_id))
+    """Consulta la orden real a Mercado Pago antes de actualizar datos."""
+    resultado = aplicar_orden(obtener_orden(order_id))
+    if resultado is None:
+        raise ValueError(f"No se pudo asociar la orden {order_id} a un pedido.")
+    return resultado
 
 
 @router.post("/webhooks/mercadopago")
 async def webhook_mercadopago(request: Request):
     parametros = request.query_params
-
     try:
         cuerpo = await request.json()
     except Exception:
@@ -201,10 +380,10 @@ async def webhook_mercadopago(request: Request):
 
     tipo = parametros.get("type") or cuerpo.get("type") or ""
     data_id_url = parametros.get("data.id")
-    data_id = data_id_url or (cuerpo.get("data") or {}).get("id")
+    datos = cuerpo.get("data") or {}
+    data_id = data_id_url or (datos.get("id") if isinstance(datos, dict) else None)
 
-    # Solo nos interesan los avisos de órdenes. Al resto se responde 200
-    # para que Mercado Pago no lo vuelva a mandar.
+    # Los eventos que no son de órdenes no requieren cambios en ALMAS.
     if tipo != "order" or not data_id:
         return Response(status_code=200)
 
@@ -214,14 +393,16 @@ async def webhook_mercadopago(request: Request):
         data_id_url or str(data_id),
     )
     if not firma_valida:
-        print(f"[Webhook] Firma inválida para la orden {data_id}; se rechaza.")
+        print(f"[Webhook] Firma inválida para la orden {data_id}.")
         return Response(status_code=401)
 
     try:
         await run_in_threadpool(procesar_orden_mp, str(data_id))
     except ErrorMercadoPago as error:
-        # Con un 500, Mercado Pago reintenta el aviso más tarde.
         print(f"[Webhook] No se pudo consultar la orden {data_id}: {error}")
+        return Response(status_code=500)
+    except Exception as error:
+        print(f"[Webhook] Error aplicando la orden {data_id}: {error}")
         return Response(status_code=500)
 
     return Response(status_code=200)

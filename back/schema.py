@@ -1,39 +1,49 @@
-import strawberry
-from typing import List, Optional
+"""Esquema GraphQL de ALMAS: catálogo, clientes, pedidos y pagos.
+
+Los cambios de inventario asociados a un cobro ocurren en webhooks.py.
+La reserva previa y la creación del intento se realizan aquí en una
+transacción SQLite, ANTES de contactar a Mercado Pago.
+"""
+
 from datetime import datetime
+from typing import List, Optional
+
+import strawberry
 from sqlmodel import Session, select
-from database import engine
 from strawberry.types import Info
+
 from auth import (
-    hash_password,
-    verify_password,
     create_access_token,
     decode_access_token,
-    get_token_from_header
+    get_token_from_header,
+    hash_password,
+    verify_password,
 )
+from database import engine, transaccion_pago
 from models import (
-    Producto as ProductoDB,
     Categoria as CategoriaDB,
-    Variante as VarianteDB,
-    Pedido as PedidoDB,
     DetallePedido as DetallePedidoDB,
-    Usuario as UsuarioDB,
     Pago as PagoDB,
+    Pedido as PedidoDB,
+    Producto as ProductoDB,
+    Usuario as UsuarioDB,
+    Variante as VarianteDB,
+    ahora,
 )
-from payments import crear_orden, ErrorMercadoPago
-from webhooks import aplicar_orden
 from panel import (
+    ClienteAdminType,
+    PagoAdminType,
+    PedidoAdminType,
     ResumenAdminType,
     calcular_resumen,
-    PedidoAdminType,
-    PagoAdminType,
-    ClienteAdminType,
-    listar_pedidos,
-    listar_pagos,
-    listar_clientes,
-    cancelar_pedido as cancelar_pedido_admin,
     cambiar_estado_cliente as cambiar_estado_cliente_admin,
+    cancelar_pedido as cancelar_pedido_admin,
+    listar_clientes,
+    listar_pagos,
+    listar_pedidos,
 )
+from payments import ErrorMercadoPago, crear_orden, obtener_orden
+from webhooks import aplicar_orden, liberar_reserva, marcar_pago_incierto
 
 
 @strawberry.type
@@ -68,7 +78,9 @@ def producto_a_type(p: ProductoDB, session: Session) -> ProductoType:
         imagen_url=p.imagen_url,
         stock=p.stock,
         categoria_id=p.categoria_id,
-        variantes=[VarianteType(id=v.id, tipo=v.tipo, valor=v.valor) for v in variantes],
+        variantes=[
+            VarianteType(id=v.id, tipo=v.tipo, valor=v.valor) for v in variantes
+        ],
         activo=p.activo,
     )
 
@@ -80,7 +92,7 @@ class CategoriaType:
     imagenUrl: Optional[str] = None
 
     @strawberry.field
-    def productos(self) -> List["ProductoType"]:
+    def productos(self) -> List[ProductoType]:
         with Session(engine) as session:
             prods = session.exec(
                 select(ProductoDB).where(
@@ -101,117 +113,199 @@ class PedidoHistorialType:
 
 
 @strawberry.type
+class DetalleMiPedidoType:
+    producto_id: int
+    nombre_producto: str
+    cantidad: int
+    precio_unitario: float
+    variante: Optional[str]
+    imagen_url: Optional[str]
+
+
+@strawberry.type
+class MiPedidoType:
+    id: int
+    fecha: datetime
+    estatus: str
+    total: float
+    direccion_envio: str
+    estado_pago: Optional[str]
+    detalles: List[DetalleMiPedidoType]
+
+
+@strawberry.type
+class EstadoPagoType:
+    pedido_id: int
+    estatus_pedido: str
+    estado_pago: Optional[str]
+    total: float
+
+
+@strawberry.type
 class Query:
     @strawberry.field
-    def products(self, categoria_id: Optional[int] = None, limit: int = 20, offset: int = 0) -> List[ProductoType]:
+    def products(
+        self,
+        categoria_id: Optional[int] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> List[ProductoType]:
         with Session(engine) as session:
-            # La tienda solo muestra productos activos.
-            query = select(ProductoDB).where(ProductoDB.activo == True)  # noqa: E712
+            consulta = select(ProductoDB).where(
+                ProductoDB.activo == True  # noqa: E712
+            )
             if categoria_id is not None:
-                query = query.where(ProductoDB.categoria_id == categoria_id)
-            query = query.offset(offset).limit(limit)
-            productos = session.exec(query).all()
+                consulta = consulta.where(ProductoDB.categoria_id == categoria_id)
+            consulta = consulta.offset(max(0, offset)).limit(max(0, min(limit, 100)))
+            productos = session.exec(consulta).all()
             return [producto_a_type(p, session) for p in productos]
 
     @strawberry.field
     def product(self, id: int) -> Optional[ProductoType]:
         with Session(engine) as session:
-            p = session.get(ProductoDB, id)
-            if p is None or not p.activo:
+            producto = session.get(ProductoDB, id)
+            if producto is None or not producto.activo:
                 return None
-            return producto_a_type(p, session)
+            return producto_a_type(producto, session)
 
     @strawberry.field
     def productos_admin(self, info: Info) -> List[ProductoType]:
-        """Todos los productos, incluidos los desactivados. Solo admin."""
         requerir_admin(info)
         with Session(engine) as session:
             productos = session.exec(
-                select(ProductoDB).order_by(ProductoDB.activo.desc(), ProductoDB.nombre)
+                select(ProductoDB).order_by(
+                    ProductoDB.activo.desc(), ProductoDB.nombre
+                )
             ).all()
             return [producto_a_type(p, session) for p in productos]
 
     @strawberry.field
     def categorias(self) -> List[CategoriaType]:
         with Session(engine) as session:
-            cats = session.exec(select(CategoriaDB)).all()
-            return [CategoriaType(id=c.id, nombre=c.nombre, imagenUrl=c.imagen_url) for c in cats]
+            categorias = session.exec(select(CategoriaDB)).all()
+            return [
+                CategoriaType(id=c.id, nombre=c.nombre, imagenUrl=c.imagen_url)
+                for c in categorias
+            ]
 
     @strawberry.field
     def categoria(self, id: int) -> Optional[CategoriaType]:
         with Session(engine) as session:
-            c = session.get(CategoriaDB, id)
-            if c is None:
+            categoria = session.get(CategoriaDB, id)
+            if categoria is None:
                 return None
-            return CategoriaType(id=c.id, nombre=c.nombre, imagenUrl=c.imagen_url)
+            return CategoriaType(
+                id=categoria.id,
+                nombre=categoria.nombre,
+                imagenUrl=categoria.imagen_url,
+            )
 
     @strawberry.field
     def pedidos(self, info: Info) -> List[PedidoHistorialType]:
-        # Lista de TODOS los pedidos de la tienda: solo para administradores.
         requerir_admin(info)
         with Session(engine) as session:
-            peds = session.exec(select(PedidoDB)).all()
+            pedidos = session.exec(select(PedidoDB)).all()
             return [
-                PedidoHistorialType(id=p.id, nombre_comprador=p.nombre_comprador, estatus=p.estatus, total=p.total, fecha=p.fecha)
-                for p in peds
+                PedidoHistorialType(
+                    id=p.id,
+                    nombre_comprador=p.nombre_comprador,
+                    estatus=p.estatus,
+                    total=p.total,
+                    fecha=p.fecha,
+                )
+                for p in pedidos
             ]
 
     @strawberry.field
-    def me(
-        self,
-        info: Info
-    ) -> "UsuarioType":
-
+    def mis_pedidos(self, info: Info) -> List[MiPedidoType]:
+        """Historial del usuario autenticado; nunca expone pedidos ajenos."""
         usuario = obtener_usuario_actual(info)
+        with Session(engine) as session:
+            pedidos = session.exec(
+                select(PedidoDB)
+                .where(PedidoDB.usuario_id == usuario.id)
+                .order_by(PedidoDB.fecha.desc(), PedidoDB.id.desc())
+            ).all()
+            resultado = []
+            for pedido in pedidos:
+                detalles_db = session.exec(
+                    select(DetallePedidoDB).where(DetallePedidoDB.pedido_id == pedido.id)
+                ).all()
+                detalles = []
+                for detalle in detalles_db:
+                    producto = session.get(ProductoDB, detalle.producto_id)
+                    variante = (
+                        session.get(VarianteDB, detalle.variante_id)
+                        if detalle.variante_id is not None
+                        else None
+                    )
+                    detalles.append(DetalleMiPedidoType(
+                        producto_id=detalle.producto_id,
+                        nombre_producto=producto.nombre if producto else "Producto no disponible",
+                        cantidad=detalle.cantidad,
+                        precio_unitario=detalle.precio_unitario,
+                        variante=(f"{variante.tipo}: {variante.valor}" if variante else None),
+                        imagen_url=producto.imagen_url if producto else None,
+                    ))
+                ultimo_pago = session.exec(
+                    select(PagoDB)
+                    .where(PagoDB.pedido_id == pedido.id)
+                    .order_by(PagoDB.fecha_actualizacion.desc(), PagoDB.id.desc())
+                ).first()
+                resultado.append(MiPedidoType(
+                    id=pedido.id,
+                    fecha=pedido.fecha,
+                    estatus=pedido.estatus,
+                    total=pedido.total,
+                    direccion_envio=pedido.direccion_envio,
+                    estado_pago=ultimo_pago.estado if ultimo_pago else None,
+                    detalles=detalles,
+                ))
+            return resultado
 
-        return usuario_a_type(usuario)
+    @strawberry.field
+    def me(self, info: Info) -> "UsuarioType":
+        return usuario_a_type(obtener_usuario_actual(info))
 
     @strawberry.field
     def pedidos_admin(self, info: Info) -> List[PedidoAdminType]:
-        """Todos los pedidos con sus productos y su último pago. Solo admin."""
         requerir_admin(info)
         return listar_pedidos()
 
     @strawberry.field
     def pagos_admin(self, info: Info) -> List[PagoAdminType]:
-        """Todos los intentos de pago registrados. Solo admin."""
         requerir_admin(info)
         return listar_pagos()
 
     @strawberry.field
     def clientes_admin(self, info: Info) -> List[ClienteAdminType]:
-        """Usuarios registrados, sin contraseñas. Solo admin."""
         requerir_admin(info)
         return listar_clientes()
 
     @strawberry.field
     def resumen_admin(self, info: Info, dias: int = 30) -> ResumenAdminType:
-        """Datos del inicio del dashboard. Solo para administradores."""
         requerir_admin(info)
         return calcular_resumen(dias)
 
     @strawberry.field
-    def estado_pedido(self, info: Info, pedido_id: int) -> "EstadoPagoType":
-        """Estado actual de un pedido del usuario y de su último pago."""
+    def estado_pedido(self, info: Info, pedido_id: int) -> EstadoPagoType:
         usuario = obtener_usuario_actual(info)
-
         with Session(engine) as session:
             pedido = session.get(PedidoDB, pedido_id)
             if pedido is None or pedido.usuario_id != usuario.id:
                 raise ValueError("Pedido no encontrado.")
-
-            ultimo_pago = session.exec(
+            ultimo = session.exec(
                 select(PagoDB)
                 .where(PagoDB.pedido_id == pedido.id)
                 .order_by(PagoDB.fecha_actualizacion.desc(), PagoDB.id.desc())
             ).first()
-
             return EstadoPagoType(
                 pedido_id=pedido.id,
                 estatus_pedido=pedido.estatus,
-                estado_pago=ultimo_pago.estado if ultimo_pago else None,
+                estado_pago=ultimo.estado if ultimo else None,
                 total=pedido.total,
             )
+
 
 @strawberry.input
 class ProductoInput:
@@ -228,8 +322,7 @@ class DetallePedidoInput:
     producto_id: int
     variante_id: Optional[int] = None
     cantidad: int
-    # Se acepta para no romper el frontend, pero el backend lo ignora:
-    # el precio real siempre se toma de la base de datos.
+    # El navegador puede enviarlo por compatibilidad, pero nunca se utiliza.
     precio_unitario: Optional[float] = None
 
 
@@ -251,13 +344,12 @@ class PedidoType:
 
 @strawberry.input
 class PagoTarjetaInput:
-    """Lo que manda el formulario de Mercado Pago. Nunca incluye la tarjeta."""
     pedido_id: int
-    token: str               # tarjeta convertida en token por Mercado Pago
-    metodo_pago: str         # marca: "visa", "master", "debvisa"...
-    tipo_pago: str           # "credit_card" o "debit_card"
-    cuotas: int = 1
+    token: str
+    metodo_pago: str
+    tipo_pago: str
     email_pagador: str
+    cuotas: int = 1
 
 
 @strawberry.type
@@ -270,7 +362,6 @@ class ResultadoPagoType:
     total: float
 
 
-# Mensajes para el cliente según el motivo que da Mercado Pago.
 MENSAJES_RECHAZO = {
     "card_insufficient_amount": "La tarjeta no tiene fondos suficientes.",
     "insufficient_amount": "La tarjeta no tiene fondos suficientes.",
@@ -289,22 +380,20 @@ MENSAJES_RECHAZO = {
 }
 
 
-def mensaje_resultado(estado: str, detalle: str | None) -> str:
+def mensaje_resultado(estado: str, detalle: Optional[str]) -> str:
     if estado == "approved":
         return "Tu pago fue aprobado. Ya estamos preparando tus joyas."
-    if estado in ("in_process", "pending"):
-        return "Tu pago está en revisión. Te avisaremos cuando Mercado Pago lo confirme."
-    return MENSAJES_RECHAZO.get(detalle or "", "No se pudo completar el pago. Prueba con otra tarjeta.")
+    if estado in ("in_process", "pending", "authorized", "creado"):
+        return (
+            "Tu pago sigue pendiente de confirmación. "
+            "No realices otro intento para este pedido."
+        )
+    if estado in ("refunded", "charged_back"):
+        return "El pago fue devuelto. Contacta a la tienda si tienes dudas."
+    return MENSAJES_RECHAZO.get(
+        detalle or "", "No se pudo completar el pago. Prueba con otra tarjeta."
+    )
 
-
-@strawberry.type
-class EstadoPagoType:
-    pedido_id: int
-    # Estado del negocio: pendiente, pagado, enviado, reembolsado.
-    estatus_pedido: str
-    # Estado según Mercado Pago: approved, pending, rejected...
-    estado_pago: Optional[str] = None
-    total: float
 
 @strawberry.input
 class RegistroInput:
@@ -312,10 +401,12 @@ class RegistroInput:
     email: str
     password: str
 
+
 @strawberry.input
 class LoginInput:
     email: str
     password: str
+
 
 @strawberry.type
 class UsuarioType:
@@ -326,7 +417,6 @@ class UsuarioType:
 
 
 def usuario_a_type(usuario: UsuarioDB) -> UsuarioType:
-    # Nunca incluye password_hash: ese dato no sale del backend.
     return UsuarioType(
         id=usuario.id,
         nombre=usuario.nombre,
@@ -334,81 +424,44 @@ def usuario_a_type(usuario: UsuarioDB) -> UsuarioType:
         rol=usuario.rol,
     )
 
+
 @strawberry.type
 class AuthPayload:
     token: str
     usuario: UsuarioType
 
-def obtener_usuario_actual(
-    info: Info
-) -> UsuarioDB:
 
-    request = info.context["request"]
-
-    authorization = request.headers.get(
-        "Authorization"
-    )
-
-    token = get_token_from_header(
-        authorization
-    )
-
+def obtener_usuario_actual(info: Info) -> UsuarioDB:
+    authorization = info.context["request"].headers.get("Authorization")
+    token = get_token_from_header(authorization)
     if not token:
-        raise ValueError(
-            "No autenticado."
-        )
+        raise ValueError("No autenticado.")
 
     payload = decode_access_token(token)
-
-    if not payload:
-        raise ValueError(
-            "Token inválido o expirado."
-        )
-
-    user_id = payload.get("sub")
-
-    if not user_id:
-        raise ValueError(
-            "Token inválido."
-        )
+    if not payload or not payload.get("sub"):
+        raise ValueError("Token inválido o expirado.")
+    try:
+        user_id = int(payload["sub"])
+    except (TypeError, ValueError):
+        raise ValueError("Token inválido.") from None
 
     with Session(engine) as session:
-
-        usuario = session.get(
-            UsuarioDB,
-            int(user_id)
-        )
-
-        if not usuario:
-            raise ValueError(
-                "Usuario no encontrado."
-            )
-
+        usuario = session.get(UsuarioDB, user_id)
+        if usuario is None:
+            raise ValueError("Usuario no encontrado.")
         if not usuario.activo:
-            raise ValueError(
-                "Usuario inactivo."
-            )
-
+            raise ValueError("Usuario inactivo.")
         return usuario
 
 
 def requerir_admin(info: Info) -> UsuarioDB:
-    """
-    Permite continuar solo si quien hace la petición es administrador.
-
-    El rol se lee de la base de datos en cada petición (no del token),
-    así que quitarle el rol a alguien le quita el acceso de inmediato.
-    """
     usuario = obtener_usuario_actual(info)
-
     if usuario.rol != "admin":
         raise ValueError("No tienes permiso para realizar esta acción.")
-
     return usuario
 
 
 def validar_producto(data: ProductoInput, session: Session) -> dict:
-    """Revisa los datos de un producto y regresa los valores limpios."""
     nombre = data.nombre.strip()
     descripcion = data.descripcion.strip()
     imagen_url = data.imagen_url.strip()
@@ -436,32 +489,70 @@ def validar_producto(data: ProductoInput, session: Session) -> dict:
     }
 
 
+def _registrar_orden_no_aplicada(intento_id: int, orden: dict) -> None:
+    """Conserva el ID conocido para poder conciliar una respuesta no aplicada.
+
+    No modifica cobros ni stock y nunca degrada un estado ya confirmado por
+    otro webhook concurrente.
+    """
+    order_id = str(orden.get("id") or "").strip()
+    if not order_id:
+        marcar_pago_incierto(intento_id)
+        return
+
+    with transaccion_pago() as session:
+        pago = session.get(PagoDB, intento_id)
+        if pago is None:
+            raise ValueError(f"Intento de pago {intento_id} no encontrado.")
+        if pago.order_id is not None and pago.order_id != order_id:
+            raise ValueError("El intento está asociado a otra orden.")
+        if pago.estado in ("enviando", "verificacion"):
+            pago.order_id = order_id
+            pago.estado = "verificacion"
+            pago.estado_detalle = "resultado_desconocido"
+            pago.fecha_actualizacion = ahora()
+            session.add(pago)
+
+
+def _mensaje_pago(resumen: dict) -> str:
+    estado_pedido = resumen["estatus_pedido"]
+    if estado_pedido.startswith("incidencia_"):
+        return (
+            "Mercado Pago registró un cobro, pero el pedido necesita revisión. "
+            "No vuelvas a pagarlo; contacta a la tienda."
+        )
+    return mensaje_resultado(resumen["estado_pago"], resumen["estado_detalle"])
+
+
 @strawberry.type
 class Mutation:
     @strawberry.mutation
     def crear_producto(self, info: Info, data: ProductoInput) -> ProductoType:
         requerir_admin(info)
-        with Session(engine) as session:
+        with transaccion_pago() as session:
             valores = validar_producto(data, session)
             nuevo = ProductoDB(**valores)
             session.add(nuevo)
-            session.commit()
-            session.refresh(nuevo)
-            return producto_a_type(nuevo, session)
+            session.flush()
+            resultado = producto_a_type(nuevo, session)
+        return resultado
 
     @strawberry.mutation
-    def actualizar_producto(self, info: Info, id: int, data: ProductoInput) -> ProductoType:
+    def actualizar_producto(
+        self, info: Info, id: int, data: ProductoInput
+    ) -> ProductoType:
         requerir_admin(info)
-        with Session(engine) as session:
+        # Usa la misma exclusión de escritura que las reservas de inventario.
+        with transaccion_pago() as session:
             producto = session.get(ProductoDB, id)
             if producto is None:
                 raise ValueError("El producto no existe.")
             for campo, valor in validar_producto(data, session).items():
                 setattr(producto, campo, valor)
             session.add(producto)
-            session.commit()
-            session.refresh(producto)
-            return producto_a_type(producto, session)
+            session.flush()
+            resultado = producto_a_type(producto, session)
+        return resultado
 
     @strawberry.mutation
     def cancelar_pedido(self, info: Info, id: int) -> PedidoAdminType:
@@ -469,99 +560,100 @@ class Mutation:
         return cancelar_pedido_admin(id)
 
     @strawberry.mutation
-    def cambiar_estado_cliente(self, info: Info, id: int, activo: bool) -> ClienteAdminType:
+    def cambiar_estado_cliente(
+        self, info: Info, id: int, activo: bool
+    ) -> ClienteAdminType:
         admin = requerir_admin(info)
         return cambiar_estado_cliente_admin(id, activo, admin.id)
 
     @strawberry.mutation
-    def cambiar_estado_producto(self, info: Info, id: int, activo: bool) -> ProductoType:
-        """
-        Desactivar en lugar de borrar: el producto deja de verse en la tienda,
-        pero los pedidos que ya lo incluyen conservan su información.
-        """
+    def cambiar_estado_producto(
+        self, info: Info, id: int, activo: bool
+    ) -> ProductoType:
         requerir_admin(info)
-        with Session(engine) as session:
+        with transaccion_pago() as session:
             producto = session.get(ProductoDB, id)
             if producto is None:
                 raise ValueError("El producto no existe.")
             producto.activo = activo
             session.add(producto)
-            session.commit()
-            session.refresh(producto)
-            return producto_a_type(producto, session)
+            session.flush()
+            resultado = producto_a_type(producto, session)
+        return resultado
 
     @strawberry.mutation
-    def actualizar_stock(self, info: Info, id: int, nuevo_stock: int) -> Optional[ProductoType]:
+    def actualizar_stock(
+        self, info: Info, id: int, nuevo_stock: int
+    ) -> Optional[ProductoType]:
         requerir_admin(info)
         if nuevo_stock < 0:
             raise ValueError("El stock no puede ser negativo.")
-        with Session(engine) as session:
-            p = session.get(ProductoDB, id)
-            if p is None:
+        with transaccion_pago() as session:
+            producto = session.get(ProductoDB, id)
+            if producto is None:
                 return None
-            p.stock = nuevo_stock
-            session.add(p)
-            session.commit()
-            session.refresh(p)
-            return producto_a_type(p, session)
+            producto.stock = nuevo_stock
+            session.add(producto)
+            session.flush()
+            resultado = producto_a_type(producto, session)
+        return resultado
 
     @strawberry.mutation
     def eliminar_producto(self, info: Info, id: int) -> bool:
+        # Desactivación lógica: conserva las referencias de pedidos históricos.
         requerir_admin(info)
-        with Session(engine) as session:
-            p = session.get(ProductoDB, id)
-            if p is None:
+        with transaccion_pago() as session:
+            producto = session.get(ProductoDB, id)
+            if producto is None:
                 return False
-            session.delete(p)
-            session.commit()
-            return True
+            producto.activo = False
+            session.add(producto)
+        return True
 
     @strawberry.mutation
     def crear_pedido(self, info: Info, data: PedidoInput) -> PedidoType:
-        """
-        Crea un pedido pendiente de pago.
+        """Crea un pedido pendiente, tomando los precios de la base.
 
-        Los precios y el stock se consultan en la base de datos; los valores
-        que manda el navegador no se usan. El inventario NO se descuenta aquí:
-        se descontará cuando Mercado Pago confirme que el pago fue aprobado.
+        Los detalles y su pedido se guardan en la misma transacción.
+        El inventario se reserva solamente cuando se inicia el pago.
         """
         usuario = obtener_usuario_actual(info)
-
         if not data.detalles:
             raise ValueError("El pedido no tiene productos.")
 
-        with Session(engine) as session:
+        with transaccion_pago() as session:
             renglones = []
-            cantidad_por_producto: dict[int, int] = {}
+            cantidades: dict[int, int] = {}
 
-            for d in data.detalles:
-                if d.cantidad <= 0:
+            for detalle in data.detalles:
+                if detalle.cantidad <= 0:
                     raise ValueError("Las cantidades deben ser mayores a cero.")
-
-                producto = session.get(ProductoDB, d.producto_id)
+                producto = session.get(ProductoDB, detalle.producto_id)
                 if producto is None or not producto.activo:
-                    raise ValueError(f"El producto {d.producto_id} ya no está disponible.")
+                    raise ValueError(
+                        f"El producto {detalle.producto_id} ya no está disponible."
+                    )
 
-                if d.variante_id is not None:
-                    variante = session.get(VarianteDB, d.variante_id)
+                if detalle.variante_id is not None:
+                    variante = session.get(VarianteDB, detalle.variante_id)
                     if variante is None or variante.producto_id != producto.id:
                         raise ValueError(
                             f"La variante elegida no corresponde a {producto.nombre}."
                         )
 
-                # Varias variantes del mismo producto comparten el stock.
-                cantidad_por_producto[producto.id] = (
-                    cantidad_por_producto.get(producto.id, 0) + d.cantidad
+                cantidades[producto.id] = (
+                    cantidades.get(producto.id, 0) + detalle.cantidad
                 )
-                if cantidad_por_producto[producto.id] > producto.stock:
+                if cantidades[producto.id] > producto.stock:
                     raise ValueError(
                         f"Solo quedan {producto.stock} piezas de {producto.nombre}."
                     )
+                renglones.append((detalle, float(producto.precio)))
 
-                renglones.append((d, float(producto.precio)))
-
-            total = round(sum(d.cantidad * precio for d, precio in renglones), 2)
-
+            total = round(
+                sum(detalle.cantidad * precio for detalle, precio in renglones),
+                2,
+            )
             pedido = PedidoDB(
                 nombre_comprador=data.nombre_comprador,
                 email_comprador=data.email_comprador,
@@ -571,188 +663,251 @@ class Mutation:
                 usuario_id=usuario.id,
             )
             session.add(pedido)
-            session.commit()
-            session.refresh(pedido)
+            session.flush()
 
-            for d, precio in renglones:
-                session.add(DetallePedidoDB(
-                    pedido_id=pedido.id,
-                    producto_id=d.producto_id,
-                    variante_id=d.variante_id,
-                    cantidad=d.cantidad,
-                    precio_unitario=precio,
-                ))
+            for detalle, precio in renglones:
+                session.add(
+                    DetallePedidoDB(
+                        pedido_id=pedido.id,
+                        producto_id=detalle.producto_id,
+                        variante_id=detalle.variante_id,
+                        cantidad=detalle.cantidad,
+                        precio_unitario=precio,
+                    )
+                )
 
-            session.commit()
-
-            return PedidoType(
+            resultado = PedidoType(
                 id=pedido.id,
                 nombre_comprador=pedido.nombre_comprador,
                 estatus=pedido.estatus,
                 total=pedido.total,
             )
+        return resultado
 
     @strawberry.mutation
     def pagar_pedido(self, info: Info, data: PagoTarjetaInput) -> ResultadoPagoType:
-        """
-        Cobra un pedido con tarjeta (Checkout API vía Orders).
-
-        El total sale del pedido guardado en la base; el navegador solo
-        manda el token de la tarjeta. Mercado Pago responde al momento.
-        """
+        """Reserva inventario de forma atómica y después contacta a Mercado Pago."""
         usuario = obtener_usuario_actual(info)
 
-        with Session(engine) as session:
-            pedido = session.get(PedidoDB, data.pedido_id)
+        if data.tipo_pago not in ("credit_card", "debit_card"):
+            raise ValueError("Solo se aceptan tarjetas de crédito o débito.")
+        token = data.token.strip() if data.token else ""
+        if not token:
+            raise ValueError("Faltan los datos de la tarjeta.")
+        if not data.metodo_pago or not data.metodo_pago.strip():
+            raise ValueError("Falta indicar el método de pago.")
+        if data.cuotas < 1:
+            raise ValueError("El número de cuotas debe ser mayor que cero.")
 
-            # Mismo mensaje en ambos casos para no revelar pedidos ajenos.
+        # BEGIN IMMEDIATE impide que dos solicitudes reserven el mismo stock
+        # o abran dos cobros sobre el mismo pedido al mismo tiempo.
+        with transaccion_pago() as session:
+            pedido = session.get(PedidoDB, data.pedido_id)
             if pedido is None or pedido.usuario_id != usuario.id:
                 raise ValueError("Pedido no encontrado.")
             if pedido.estatus != "pendiente":
                 raise ValueError("Este pedido ya no está pendiente de pago.")
 
+            pago_abierto = session.exec(
+                select(PagoDB).where(
+                    PagoDB.pedido_id == pedido.id,
+                    PagoDB.estado.in_([
+                        "enviando", "verificacion", "creado", "pending",
+                        "in_process", "authorized", "approved",
+                    ]),
+                )
+            ).first()
+            if pago_abierto is not None:
+                raise ValueError(
+                    "Ya existe un intento de pago en proceso o por verificar. "
+                    "No intentes cobrar este pedido otra vez."
+                )
+
             detalles = session.exec(
-                select(DetallePedidoDB).where(DetallePedidoDB.pedido_id == pedido.id)
+                select(DetallePedidoDB).where(
+                    DetallePedidoDB.pedido_id == pedido.id
+                )
             ).all()
             if not detalles:
                 raise ValueError("El pedido no tiene productos.")
-            for d in detalles:
-                producto = session.get(ProductoDB, d.producto_id)
+
+            cantidades: dict[int, int] = {}
+            for detalle in detalles:
+                if detalle.cantidad <= 0:
+                    raise ValueError("El pedido contiene cantidades inválidas.")
+                cantidades[detalle.producto_id] = (
+                    cantidades.get(detalle.producto_id, 0) + detalle.cantidad
+                )
+
+            for producto_id, cantidad in cantidades.items():
+                producto = session.get(ProductoDB, producto_id)
                 if producto is None or not producto.activo:
-                    raise ValueError("Uno de los productos del pedido ya no está disponible.")
-                if d.cantidad > producto.stock:
-                    raise ValueError(f"Ya no hay stock suficiente de {producto.nombre}.")
+                    raise ValueError(
+                        "Uno de los productos del pedido ya no está disponible."
+                    )
+                if producto.stock < cantidad:
+                    raise ValueError(
+                        f"Ya no hay stock suficiente de {producto.nombre}."
+                    )
+                producto.stock -= cantidad
+                session.add(producto)
 
-            # Si un cobro anterior sigue en revisión, no se permite otro:
-            # podrían aprobarse los dos y cobrarle doble al cliente.
-            en_revision = session.exec(
-                select(PagoDB).where(
-                    PagoDB.pedido_id == pedido.id,
-                    PagoDB.estado.in_(["in_process", "pending"]),
-                )
-            ).first()
-            if en_revision:
-                raise ValueError(
-                    "Ya hay un pago de este pedido en revisión. Espera la confirmación de Mercado Pago."
-                )
-
+            # Conservar un único registro por intento y su reserva.
+            pago = PagoDB(
+                pedido_id=pedido.id,
+                monto=pedido.total,
+                moneda="MXN",
+                estado="enviando",
+                inventario_aplicado=True,
+            )
+            session.add(pago)
+            session.flush()
+            intento_id = pago.id
             pedido_id, total = pedido.id, pedido.total
-
-        if data.tipo_pago not in ("credit_card", "debit_card"):
-            raise ValueError("Solo se aceptan tarjetas de crédito o débito.")
-        if not data.token.strip():
-            raise ValueError("Faltan los datos de la tarjeta.")
 
         try:
             orden = crear_orden(
                 pedido_id=pedido_id,
                 monto=total,
-                token=data.token.strip(),
+                token=token,
                 metodo_pago=data.metodo_pago,
                 tipo_pago=data.tipo_pago,
-                cuotas=max(1, data.cuotas),
+                cuotas=data.cuotas,
                 email_pagador=data.email_pagador,
+                intento_id=intento_id,
             )
         except ErrorMercadoPago as error:
-            # El detalle técnico queda en la consola del servidor;
-            # al cliente solo le llega un mensaje general.
-            print(f"[Mercado Pago] Pedido {pedido_id}: {error}")
-            raise ValueError("No se pudo procesar el pago con Mercado Pago. Intenta de nuevo.")
+            print(f"[Mercado Pago] Pedido {pedido_id}, intento {intento_id}: {error}")
+            if error.resultado_incierto:
+                marcar_pago_incierto(intento_id)
+                raise ValueError(
+                    "No pudimos confirmar el resultado del pago. "
+                    "No vuelvas a intentar pagar este pedido hasta verificarlo con la tienda."
+                ) from error
+            # Solo liberar si sabemos que no hubo cobro ni orden aceptada.
+            try:
+                liberar_reserva(intento_id)
+            except ValueError:
+                # Un webhook pudo haberse adelantado y actualizado el pago.
+                raise ValueError(
+                    "El resultado del pago cambió mientras se procesaba. "
+                    "Verifica el pedido antes de volver a pagar."
+                ) from error
+            raise ValueError(
+                "Mercado Pago no pudo procesar la tarjeta. Intenta de nuevo."
+            ) from error
 
-        resumen = aplicar_orden(orden, pedido_esperado=pedido_id)
-        if resumen is None:
-            raise ValueError("No se pudo registrar el resultado del pago.")
+        try:
+            resumen = aplicar_orden(orden, pedido_esperado=pedido_id)
+            if resumen is None:
+                raise ValueError("La respuesta de Mercado Pago no se pudo asociar.")
+        except Exception as error:
+            print(
+                f"[Pagos] Error registrando pedido {pedido_id}, "
+                f"intento {intento_id}: {error}"
+            )
+            # Tenemos un ID de orden; registrarlo para facilitar la conciliación.
+            try:
+                _registrar_orden_no_aplicada(intento_id, orden)
+            except Exception as error_registro:
+                print(
+                    f"[Pagos] No se pudo guardar la orden para conciliar: "
+                    f"{error_registro}"
+                )
+                marcar_pago_incierto(intento_id)
+            raise ValueError(
+                "No pudimos confirmar el resultado del pago. "
+                "No vuelvas a intentar pagar este pedido hasta verificarlo con la tienda."
+            ) from error
 
         return ResultadoPagoType(
             pedido_id=pedido_id,
             aprobado=resumen["estatus_pedido"] == "pagado",
             estatus_pedido=resumen["estatus_pedido"],
             estado_pago=resumen["estado_pago"],
-            mensaje=mensaje_resultado(resumen["estado_pago"], resumen["estado_detalle"]),
+            mensaje=_mensaje_pago(resumen),
             total=resumen["total"],
         )
 
     @strawberry.mutation
-    def registrar_usuario(
-        self,
-        data: RegistroInput
-        ) -> UsuarioType:
+    def conciliar_pago(
+        self, info: Info, pedido_id: int, order_id: str
+    ) -> ResultadoPagoType:
+        """Reconsulta una orden verificada. Solo administradores."""
+        requerir_admin(info)
+        order_id = order_id.strip()
+        if not order_id:
+            raise ValueError("Debes proporcionar el ID de la orden.")
 
-        with Session(engine) as session:
-
-            usuario_existente = session.exec(
-                select(UsuarioDB).where(
-                    UsuarioDB.email == data.email
-                )
-            ).first()
-
-        if usuario_existente:
+        try:
+            orden = obtener_orden(order_id)
+        except ErrorMercadoPago as error:
+            print(f"[Conciliación] Pedido {pedido_id}, orden {order_id}: {error}")
             raise ValueError(
-                "Ya existe un usuario con ese correo."
-            )
+                "No se pudo consultar la orden en Mercado Pago."
+            ) from error
 
-        usuario = UsuarioDB(
-            nombre=data.nombre,
-            email=data.email,
-            password_hash=hash_password(
-                data.password
-            ),
-            # El registro público SIEMPRE crea clientes. RegistroInput no
-            # tiene campo "rol", así que nadie puede pedir ser admin.
-            rol="cliente",
+        resumen = aplicar_orden(orden, pedido_esperado=pedido_id)
+        if resumen is None:
+            raise ValueError("La orden no corresponde a un pedido válido.")
+
+        return ResultadoPagoType(
+            pedido_id=resumen["pedido_id"],
+            aprobado=resumen["estatus_pedido"] == "pagado",
+            estatus_pedido=resumen["estatus_pedido"],
+            estado_pago=resumen["estado_pago"],
+            mensaje=_mensaje_pago(resumen),
+            total=resumen["total"],
         )
-
-        session.add(usuario)
-        session.commit()
-        session.refresh(usuario)
-
-        return usuario_a_type(usuario)
 
     @strawberry.mutation
-    def login(
-        self,
-        data: LoginInput
-    ) -> AuthPayload:
+    def confirmar_sin_cobro(
+        self, info: Info, intento_id: int, confirmacion: str
+    ) -> bool:
+        """Reversión excepcional de una reserva; exige verificación humana."""
+        requerir_admin(info)
+        if confirmacion != f"SIN COBRO {intento_id}":
+            raise ValueError("La confirmación no coincide.")
+        return liberar_reserva(intento_id, revision_admin=True)
 
+    @strawberry.mutation
+    def registrar_usuario(self, data: RegistroInput) -> UsuarioType:
+        email = data.email.strip().lower()
+        nombre = data.nombre.strip()
+        if not email or not nombre or not data.password:
+            raise ValueError("Debes indicar nombre, correo y contraseña.")
+        with Session(engine) as session:
+            existente = session.exec(
+                select(UsuarioDB).where(UsuarioDB.email == email)
+            ).first()
+            if existente is not None:
+                raise ValueError("Ya existe un usuario con ese correo.")
+            nuevo = UsuarioDB(
+                nombre=nombre,
+                email=email,
+                password_hash=hash_password(data.password),
+                rol="cliente",
+            )
+            session.add(nuevo)
+            session.commit()
+            session.refresh(nuevo)
+            return usuario_a_type(nuevo)
+
+    @strawberry.mutation
+    def login(self, data: LoginInput) -> AuthPayload:
+        email = data.email.strip().lower()
         with Session(engine) as session:
             usuario = session.exec(
-            select(UsuarioDB).where(
-                UsuarioDB.email == data.email
-            )
-        ).first()
-
-        if not usuario:
-            raise ValueError(
-                "Correo o contraseña incorrectos."
-            )
-
-        if not usuario.password_hash:
-            raise ValueError(
-                "Correo o contraseña incorrectos."
-            )
-
-        if not verify_password(
-            data.password,
-            usuario.password_hash
-        ):
-            raise ValueError(
-                "Correo o contraseña incorrectos."
-            )
-
-        if not usuario.activo:
-            raise ValueError(
-                "Usuario inactivo."
-            )
-
-        token = create_access_token(
-            user_id=usuario.id,
-            email=usuario.email
-        )
-
-        return AuthPayload(
-            token=token,
-            usuario=usuario_a_type(usuario),
-        )
+                select(UsuarioDB).where(UsuarioDB.email == email)
+            ).first()
+            if usuario is None or not usuario.password_hash:
+                raise ValueError("Correo o contraseña incorrectos.")
+            if not verify_password(data.password, usuario.password_hash):
+                raise ValueError("Correo o contraseña incorrectos.")
+            if not usuario.activo:
+                raise ValueError("Usuario inactivo.")
+            token = create_access_token(user_id=usuario.id, email=usuario.email)
+            return AuthPayload(token=token, usuario=usuario_a_type(usuario))
 
 
 schema = strawberry.Schema(query=Query, mutation=Mutation)
