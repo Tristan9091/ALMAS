@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { graphqlAuthRequest } from "../../graphql/client";
 import { useAdmin } from "./useAdmin";
 import EstadoAcceso from "./EstadoAcceso";
@@ -22,37 +22,58 @@ const PAGOS_QUERY = `
   }
 `;
 
-const EN_PROCESO = ["pending", "in_process", "authorized"];
+// Estados del intento de cobro, no del pedido.
+const EN_PROCESO = [
+  "enviando",
+  "pending",
+  "in_process",
+  "authorized",
+  "verificacion",
+];
 const FALLIDOS = ["rejected", "cancelled", "refunded", "charged_back"];
 
 const FILTROS = [
   ["todos", "Todos", () => true],
   ["aprobados", "Aprobados", (p) => p.estado === "approved"],
   ["proceso", "En proceso", (p) => EN_PROCESO.includes(p.estado)],
+  ["verificar", "Por verificar", (p) => p.estado === "verificacion"],
   ["fallidos", "Rechazados o devueltos", (p) => FALLIDOS.includes(p.estado)],
-  ["sin", "Sin completar", (p) => p.estado === "creado"],
+  ["sin", "Sin confirmar", (p) => p.estado === "creado"],
 ];
 
 /**
- * Lista de solo lectura. Los estados vienen de lo que Mercado Pago
- * confirmó al backend; desde aquí no se puede cambiar ninguno.
+ * Historial de intentos de pago. Esta vista es de solo lectura.
+ * La conciliación con Mercado Pago se hace desde PedidosAdmin.
+ * Un estado incierto NO indica que se pueda cobrar de nuevo.
  */
 export default function PagosAdmin() {
   const acceso = useAdmin();
   const [pagos, setPagos] = useState(null);
   const [error, setError] = useState(null);
+  const [cargando, setCargando] = useState(false);
   const [filtro, setFiltro] = useState("todos");
 
+  const cargar = useCallback(async () => {
+    setCargando(true);
+    setError(null);
+    try {
+      const data = await graphqlAuthRequest(PAGOS_QUERY);
+      setPagos(data.pagosAdmin ?? []);
+    } catch (err) {
+      setError(err.message || "No se pudieron cargar los pagos.");
+    } finally {
+      setCargando(false);
+    }
+  }, []);
+
   useEffect(() => {
-    if (acceso.estado !== "listo") return;
-    graphqlAuthRequest(PAGOS_QUERY)
-      .then((data) => setPagos(data.pagosAdmin))
-      .catch((err) => setError(err.message));
-  }, [acceso.estado]);
+    if (acceso.estado === "listo") cargar();
+  }, [acceso.estado, cargar]);
 
   const visibles = useMemo(() => {
     if (!pagos) return [];
-    const condicion = FILTROS.find(([v]) => v === filtro)[2];
+    const condicion =
+      FILTROS.find(([valor]) => valor === filtro)?.[2] ?? (() => true);
     return pagos.filter(condicion);
   }, [pagos, filtro]);
 
@@ -60,7 +81,10 @@ export default function PagosAdmin() {
     return <EstadoAcceso acceso={acceso} />;
   }
 
-  const aprobados = pagos ? pagos.filter((p) => p.estado === "approved") : [];
+  const aprobados = pagos?.filter((p) => p.estado === "approved") ?? [];
+  const enProceso = pagos?.filter((p) => EN_PROCESO.includes(p.estado)) ?? [];
+  const porVerificar = pagos?.filter((p) => p.estado === "verificacion") ?? [];
+  const fallidos = pagos?.filter((p) => FALLIDOS.includes(p.estado)) ?? [];
 
   return (
     <div className="admin-pagina">
@@ -69,35 +93,66 @@ export default function PagosAdmin() {
           <p className="admin-saludo">Mercado Pago</p>
           <h1>Pagos</h1>
         </div>
+        <button
+          type="button"
+          className="admin-boton secundario"
+          onClick={cargar}
+          disabled={cargando}
+        >
+          {cargando ? "Actualizando…" : "Actualizar"}
+        </button>
       </header>
 
-      {error && <div className="admin-aviso-linea">No se pudieron cargar los pagos: {error}</div>}
+      {error && (
+        <div className="admin-aviso-linea" role="alert">
+          No se pudieron cargar los pagos: {error}
+        </div>
+      )}
 
       {pagos && (
         <section className="tarjetas tarjetas-3" aria-label="Totales de pagos">
           <article className="tarjeta destacada">
-            <p className="tarjeta-etiqueta">Cobrado</p>
-            <p className="tarjeta-valor">{dinero(aprobados.reduce((s, p) => s + p.monto, 0))}</p>
-            <p className="tarjeta-detalle">{aprobados.length} pagos aprobados</p>
+            <p className="tarjeta-etiqueta">Pagos aprobados</p>
+            <p className="tarjeta-valor">
+              {dinero(aprobados.reduce((suma, pago) => suma + pago.monto, 0))}
+            </p>
+            <p className="tarjeta-detalle">
+              {aprobados.length} intentos aprobados; no equivale a ventas netas
+            </p>
           </article>
           <article className="tarjeta">
             <p className="tarjeta-etiqueta">En proceso</p>
-            <p className="tarjeta-valor">{pagos.filter((p) => EN_PROCESO.includes(p.estado)).length}</p>
-            <p className="tarjeta-detalle">Efectivo o transferencia por acreditar</p>
+            <p className="tarjeta-valor">{enProceso.length}</p>
+            <p className="tarjeta-detalle">
+              {porVerificar.length} requieren verificación
+            </p>
           </article>
           <article className="tarjeta">
             <p className="tarjeta-etiqueta">Rechazados o devueltos</p>
-            <p className="tarjeta-valor">{pagos.filter((p) => FALLIDOS.includes(p.estado)).length}</p>
-            <p className="tarjeta-detalle">No generaron cobro</p>
+            <p className="tarjeta-valor">{fallidos.length}</p>
+            <p className="tarjeta-detalle">Incluye reembolsos y contracargos</p>
           </article>
         </section>
       )}
 
+      {porVerificar.length > 0 && (
+        <div className="admin-aviso-linea" role="status">
+          Hay {porVerificar.length} intento(s) con resultado incierto. Consulta
+          la operación en Mercado Pago y usa la conciliación desde Pedidos. No
+          solicites un segundo pago sin comprobar el primero.
+        </div>
+      )}
+
       <div className="admin-filtros">
-        <div className="admin-segmentos" role="group" aria-label="Filtrar pagos">
+        <div
+          className="admin-segmentos"
+          role="group"
+          aria-label="Filtrar pagos"
+        >
           {FILTROS.map(([valor, texto, condicion]) => (
             <button
               key={valor}
+              type="button"
               className={filtro === valor ? "activo" : ""}
               aria-pressed={filtro === valor}
               onClick={() => setFiltro(valor)}
@@ -127,21 +182,27 @@ export default function PagosAdmin() {
                 </tr>
               </thead>
               <tbody>
-                {visibles.map((p) => (
-                  <tr key={p.id}>
-                    <td className="mono">{p.paymentId ?? "—"}</td>
-                    <td className="tabla-id">#{p.pedidoId}</td>
-                    <td>
-                      {p.cliente}
-                      <small>{p.email}</small>
+                {visibles.map((pago) => (
+                  <tr key={pago.id}>
+                    <td className="mono">
+                      {pago.paymentId ?? "—"}
+                      <small>Intento #{pago.id}</small>
                     </td>
-                    <td className="tabla-fecha">{fechaHora(p.fecha)}</td>
+                    <td className="tabla-id">#{pago.pedidoId}</td>
+                    <td>
+                      {pago.cliente}
+                      <small>{pago.email}</small>
+                    </td>
+                    <td className="tabla-fecha">{fechaHora(pago.fecha)}</td>
                     <td className="num">
-                      {dinero(p.monto)}
-                      {p.moneda !== "MXN" && <small>{p.moneda}</small>}
+                      {dinero(pago.monto)}
+                      {pago.moneda !== "MXN" && <small>{pago.moneda}</small>}
                     </td>
                     <td>
-                      <EstadoBadge estado={p.estado} tipo="pago" />
+                      <EstadoBadge estado={pago.estado} tipo="pago" />
+                      {pago.estadoDetalle && (
+                        <small>{pago.estadoDetalle}</small>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -150,7 +211,9 @@ export default function PagosAdmin() {
           </div>
         )}
         <p className="admin-nota">
-          "Sin completar" significa que el cliente abrió Mercado Pago pero no terminó de pagar.
+          Los estados describen intentos de cobro. «Sin confirmar» o «Requiere
+          verificación» no garantizan que no exista un cargo. La conciliación se
+          realiza desde la sección Pedidos.
         </p>
       </section>
     </div>

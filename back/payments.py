@@ -1,20 +1,13 @@
 """
-payments.py — Comunicación con Mercado Pago (Checkout API vía Orders).
+payments.py — Comunicación de ALMAS con Mercado Pago (Checkout API vía Orders).
 
-Flujo:
-  1. En el navegador, el formulario de Mercado Pago (Card Payment Brick)
-     convierte la tarjeta en un "token" de un solo uso. Los datos de la
-     tarjeta NUNCA llegan a este servidor.
-  2. Este módulo crea la orden de cobro con ese token: POST /v1/orders.
-  3. Mercado Pago responde al instante si se aprobó o se rechazó.
+Este módulo crea y consulta órdenes, y verifica firmas de webhooks.
+No modifica pedidos, pagos ni inventario: esa lógica vive en webhooks.py.
 
-Este archivo solo habla con Mercado Pago; no toca la base de datos.
-
-Variables de entorno (back/.env):
-    MP_ACCESS_TOKEN            Access Token (credenciales de prueba).
-    MP_WEBHOOK_SECRET          Clave secreta de Webhooks (para validar avisos).
-    MP_EMAIL_PAGADOR_PRUEBA    Solo en pruebas: correo @testuser.com que
-                               Mercado Pago exige como pagador en sandbox.
+Variables de entorno:
+    MP_ACCESS_TOKEN
+    MP_WEBHOOK_SECRET
+    MP_EMAIL_PAGADOR_PRUEBA  (solo para sandbox)
 """
 
 import hashlib
@@ -28,12 +21,20 @@ load_dotenv()
 
 API_MP = "https://api.mercadopago.com"
 TIMEOUT_SEGUNDOS = 20
-
 TIPOS_TARJETA = {"credit_card", "debit_card"}
 
 
 class ErrorMercadoPago(Exception):
-    """Error al comunicarse con Mercado Pago. Nunca incluye el token."""
+    """Error de Mercado Pago, sin exponer datos de la tarjeta.
+
+    resultado_incierto=True significa que la solicitud pudo haberse
+    procesado aunque nuestro servidor no recibiera una respuesta válida.
+    En ese caso NO se debe liberar la reserva ni volver a cobrar.
+    """
+
+    def __init__(self, mensaje: str, resultado_incierto: bool = False):
+        super().__init__(mensaje)
+        self.resultado_incierto = resultado_incierto
 
 
 def _access_token() -> str:
@@ -48,11 +49,17 @@ def _mensaje_de_error(respuesta: requests.Response) -> str:
         datos = respuesta.json()
     except ValueError:
         return respuesta.text[:200]
+
+    if not isinstance(datos, dict):
+        return respuesta.text[:200]
+
     errores = datos.get("errors") or []
-    if errores and isinstance(errores, list):
+    if isinstance(errores, list) and errores:
         primero = errores[0]
-        return f"{primero.get('code')}: {primero.get('message')}"
-    return datos.get("message") or datos.get("error") or respuesta.text[:200]
+        if isinstance(primero, dict):
+            return f"{primero.get('code')}: {primero.get('message')}"
+
+    return str(datos.get("message") or datos.get("error") or respuesta.text[:200])
 
 
 def crear_orden(
@@ -63,27 +70,45 @@ def crear_orden(
     tipo_pago: str,
     cuotas: int,
     email_pagador: str,
+    intento_id: int | None = None,
 ) -> dict:
-    """
-    Cobra con tarjeta. Regresa la orden tal como la responde Mercado Pago
-    (incluye status y status_detail, aprobada o rechazada).
+    """Envía un intento de cobro y devuelve la orden de Mercado Pago.
 
-    El monto lo calcula el backend a partir del pedido; nunca se toma
-    del navegador.
+    Los intentos nuevos se identifican como 'pedido_id_intento_id'.
+    Se admite intento_id=None temporalmente para órdenes antiguas; los
+    nuevos pagos deben enviarlo desde schema.py.
     """
     if tipo_pago not in TIPOS_TARJETA:
         raise ErrorMercadoPago("Solo se aceptan tarjetas de crédito o débito.")
+    if pedido_id <= 0:
+        raise ErrorMercadoPago("El identificador del pedido no es válido.")
+    if intento_id is not None and intento_id <= 0:
+        raise ErrorMercadoPago("El identificador del intento no es válido.")
+    if not token or not token.strip():
+        raise ErrorMercadoPago("Faltan los datos de la tarjeta.")
+    if not metodo_pago or not metodo_pago.strip():
+        raise ErrorMercadoPago("Falta indicar el método de pago.")
+    if cuotas < 1:
+        raise ErrorMercadoPago("Las cuotas deben ser mayores que cero.")
+    if monto <= 0:
+        raise ErrorMercadoPago("El monto del pedido debe ser mayor que cero.")
 
+    # Obtener las credenciales ANTES de enviar el cobro: si faltan,
+    # es un error seguro (la solicitud nunca llegó a Mercado Pago).
+    access_token = _access_token()
     importe = f"{monto:.2f}"
-    # En pruebas, Mercado Pago solo acepta correos de su dominio de prueba.
     email = (os.getenv("MP_EMAIL_PAGADOR_PRUEBA") or "").strip() or email_pagador
 
+    referencia = (
+        f"{pedido_id}_{intento_id}"
+        if intento_id is not None
+        else str(pedido_id)
+    )
     cuerpo = {
         "type": "online",
         "processing_mode": "automatic",
         "total_amount": importe,
-        # Así relacionamos la orden de Mercado Pago con nuestro pedido.
-        "external_reference": str(pedido_id),
+        "external_reference": referencia,
         "payer": {"email": email},
         "transactions": {
             "payments": [
@@ -100,45 +125,68 @@ def crear_orden(
         },
     }
 
-    # La "llave de idempotencia" evita cobrar dos veces si la misma
-    # solicitud se manda de nuevo (por ejemplo, doble clic). Cada token
-    # es de un solo uso, así que el token identifica el intento.
-    llave = hashlib.sha256(f"almas-{pedido_id}-{token}".encode()).hexdigest()
+    # La idempotencia se asocia al intento guardado en ALMAS.
+    # El token solo se usa como respaldo para integraciones anteriores.
+    if intento_id is not None:
+        semilla = f"almas-pago-{pedido_id}-{intento_id}"
+    else:
+        semilla = f"almas-{pedido_id}-{token}"
+    llave = hashlib.sha256(semilla.encode("utf-8")).hexdigest()
 
     try:
         respuesta = requests.post(
             f"{API_MP}/v1/orders",
             json=cuerpo,
             headers={
-                "Authorization": f"Bearer {_access_token()}",
+                "Authorization": f"Bearer {access_token}",
                 "X-Idempotency-Key": llave,
             },
             timeout=TIMEOUT_SEGUNDOS,
         )
     except requests.RequestException as error:
-        raise ErrorMercadoPago(f"No se pudo conectar con Mercado Pago: {error}") from error
+        # Un timeout o corte de red no permite saber si hubo cobro.
+        raise ErrorMercadoPago(
+            f"No se recibió una respuesta confiable de Mercado Pago: {error}",
+            resultado_incierto=True,
+        ) from error
 
-    if respuesta.status_code in (200, 201):
-        return respuesta.json()
-
-    # Cuando la tarjeta se rechaza, Mercado Pago puede responder con un
-    # error (402) que de todos modos trae la orden fallida en "data".
     try:
         datos = respuesta.json()
     except ValueError:
-        datos = {}
-    orden = datos.get("data") if isinstance(datos, dict) else None
-    if isinstance(orden, dict) and orden.get("id"):
-        return orden
+        datos = None
 
+    if respuesta.status_code in (200, 201):
+        if isinstance(datos, dict) and datos.get("id"):
+            return datos
+        raise ErrorMercadoPago(
+            "Mercado Pago respondió correctamente, pero sin una orden identificable.",
+            resultado_incierto=True,
+        )
+
+    # Algunos cobros rechazados llegan como HTTP 402 y contienen la
+    # orden fallida dentro de data; se registra para liberar inventario.
+    if respuesta.status_code == 402:
+        orden = datos.get("data") if isinstance(datos, dict) else None
+        if isinstance(orden, dict) and orden.get("id"):
+            return orden
+
+    # Los errores conocidos de validación/autorización indican que la
+    # solicitud fue rechazada. Los errores de red/servidor, 409, 423 y 429
+    # se tratan como inciertos: nunca es seguro cobrar otra vez a ciegas.
+    resultado_incierto = respuesta.status_code not in {
+        400, 401, 402, 403, 404, 422
+    }
     raise ErrorMercadoPago(
-        f"Mercado Pago respondió {respuesta.status_code}: {_mensaje_de_error(respuesta)}"
+        f"Mercado Pago respondió {respuesta.status_code}: "
+        f"{_mensaje_de_error(respuesta)}",
+        resultado_incierto=resultado_incierto,
     )
 
 
 def obtener_orden(order_id: str) -> dict:
-    """Consulta una orden directamente a Mercado Pago (fuente confiable)."""
-    if not str(order_id).isalnum():
+    """Consulta una orden real de Mercado Pago sin cambiar la base."""
+    order_id = str(order_id).strip()
+    if not order_id or not order_id.isalnum():
         raise ErrorMercadoPago("El identificador de la orden no es válido.")
 
     try:
@@ -148,13 +196,26 @@ def obtener_orden(order_id: str) -> dict:
             timeout=TIMEOUT_SEGUNDOS,
         )
     except requests.RequestException as error:
-        raise ErrorMercadoPago(f"No se pudo conectar con Mercado Pago: {error}") from error
+        raise ErrorMercadoPago(
+            f"No se pudo consultar la orden en Mercado Pago: {error}"
+        ) from error
 
     if respuesta.status_code != 200:
         raise ErrorMercadoPago(
-            f"Mercado Pago respondió {respuesta.status_code}: {_mensaje_de_error(respuesta)}"
+            f"Mercado Pago respondió {respuesta.status_code}: "
+            f"{_mensaje_de_error(respuesta)}"
         )
-    return respuesta.json()
+
+    try:
+        orden = respuesta.json()
+    except ValueError as error:
+        raise ErrorMercadoPago(
+            "Mercado Pago devolvió una respuesta inválida al consultar la orden."
+        ) from error
+
+    if not isinstance(orden, dict) or not orden.get("id"):
+        raise ErrorMercadoPago("No se obtuvo una orden válida de Mercado Pago.")
+    return orden
 
 
 def validar_firma_webhook(
@@ -162,10 +223,7 @@ def validar_firma_webhook(
     x_request_id: str | None,
     data_id: str | None,
 ) -> bool:
-    # Comprueba que la notificación realmente viene de Mercado Pago.
-    # Mercado Pago firma con HMAC-SHA256 el texto
-    #   id:<data.id en minúsculas>;request-id:<x-request-id>;ts:<ts>;
-    # usando la clave secreta de Webhooks del panel (MP_WEBHOOK_SECRET).
+    """Verifica la firma HMAC-SHA256 enviada con el aviso de Mercado Pago."""
     secreto = (os.getenv("MP_WEBHOOK_SECRET") or "").strip()
     if not secreto or not x_signature:
         return False
@@ -180,7 +238,7 @@ def validar_firma_webhook(
     if not ts or not firma_recibida:
         return False
 
-    # Solo se incluyen los datos que llegaron en la notificación.
+    # El manifiesto usa los datos presentes en la notificación.
     manifest = ""
     if data_id:
         manifest += f"id:{str(data_id).lower()};"
@@ -193,6 +251,4 @@ def validar_firma_webhook(
         manifest.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
-
-    # compare_digest evita ataques que miden cuánto tarda la comparación.
     return hmac.compare_digest(firma_calculada, firma_recibida)
