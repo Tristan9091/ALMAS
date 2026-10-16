@@ -1,115 +1,131 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useCartStore } from "../../store/useCartStore";
 import { graphqlAuthRequest } from "../../graphql/client";
+import FormularioTarjeta from "./FormularioTarjeta";
 
 import "../../styles/checkout.css";
 
+/**
+ * Checkout en dos pasos, sin salir de ALMĀS (Checkout API de Mercado Pago):
+ *   1. Datos de envío → el backend crea el pedido y calcula el total real.
+ *   2. Tarjeta → Mercado Pago la convierte en token, el backend cobra y
+ *      responde al momento si se aprobó.
+ */
 export default function Checkout() {
   const cart = useCartStore((state) => state.cart);
+  const clearCart = useCartStore((state) => state.clearCart);
 
   const [nombre, setNombre] = useState("");
   const [email, setEmail] = useState("");
   const [direccion, setDireccion] = useState("");
 
+  const [checkingAuth, setCheckingAuth] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Si el pedido se creó pero falló Mercado Pago, se reintenta
-  // con el mismo pedido en lugar de crear uno nuevo.
-  const [pedidoId, setPedidoId] = useState(null);
+  // Pedido creado en el paso 1: { id, total }
+  const [pedido, setPedido] = useState(null);
+  // Resultado del cobro: { aprobado, estadoPago, mensaje, ... }
+  const [resultado, setResultado] = useState(null);
 
-  const [checkingAuth, setCheckingAuth] = useState(true);
-
-  // Total aproximado para mostrar. El total que se cobra lo calcula el backend.
-  const total = cart.reduce(
-    (sum, item) => sum + item.precio * item.cantidad,
-    0,
-  );
+  // Total aproximado para el resumen. El que se cobra lo calcula el backend.
+  const totalCarrito = cart.reduce((sum, item) => sum + item.precio * item.cantidad, 0);
 
   useEffect(() => {
     const verificarSesion = async () => {
-      const token = localStorage.getItem("almas-token");
-
-      if (!token) {
+      if (!localStorage.getItem("almas-token")) {
         window.location.href = "/login";
         return;
       }
-
       try {
         const data = await graphqlAuthRequest(ME_QUERY);
-
-        // Rellena los datos del comprador con su cuenta.
         setNombre((actual) => actual || data.me.nombre);
         setEmail((actual) => actual || data.me.email);
-
         setCheckingAuth(false);
       } catch (err) {
         console.error(err);
-
         localStorage.removeItem("almas-token");
         localStorage.removeItem("almas-user");
-
         window.location.href = "/login";
       }
     };
-
     verificarSesion();
   }, []);
 
-  const handleSubmit = async (event) => {
+  // Paso 1: crear el pedido (el backend valida precios y stock).
+  const continuarAlPago = async (event) => {
     event.preventDefault();
-
     setLoading(true);
     setError(null);
-
     try {
-      let idPedido = pedidoId;
-
-      // 1. Crear el pedido (el backend valida precios y stock).
-      if (!idPedido) {
-        const data = await graphqlAuthRequest(CREAR_PEDIDO, {
-          data: {
-            nombreComprador: nombre,
-            emailComprador: email,
-            direccionEnvio: direccion,
-
-            detalles: cart.map((item) => ({
-              productoId: item.id,
-              varianteId: item.varianteId ?? null,
-              cantidad: item.cantidad,
-            })),
-          },
-        });
-
-        idPedido = data.crearPedido.id;
-        setPedidoId(idPedido);
-      }
-
-      // 2. Pedir a nuestro backend el link de pago de Mercado Pago.
-      const pago = await graphqlAuthRequest(CREAR_PREFERENCIA_PAGO, {
-        pedidoId: idPedido,
+      const data = await graphqlAuthRequest(CREAR_PEDIDO, {
+        data: {
+          nombreComprador: nombre,
+          emailComprador: email,
+          direccionEnvio: direccion,
+          detalles: cart.map((item) => ({
+            productoId: item.id,
+            varianteId: item.varianteId ?? null,
+            cantidad: item.cantidad,
+          })),
+        },
       });
-
-      // 3. Llevar al comprador a Mercado Pago.
-      // El carrito NO se vacía aquí: se vacía cuando el pago se confirma.
-      window.location.href = pago.crearPreferenciaPago.initPoint;
+      setPedido(data.crearPedido);
     } catch (err) {
       console.error(err);
-
-      setError(err.message || "No se pudo iniciar el pago.");
+      setError(err.message || "No se pudo crear el pedido.");
+    } finally {
       setLoading(false);
     }
   };
 
+  // Paso 2: cobrar con el token que entrega el formulario de Mercado Pago.
+  const pagar = useCallback(
+    async (tarjeta) => {
+      setError(null);
+      try {
+        const data = await graphqlAuthRequest(PAGAR_PEDIDO, {
+          data: { pedidoId: pedido.id, ...tarjeta },
+        });
+        const r = data.pagarPedido;
+
+        if (r.aprobado || r.estadoPago === "in_process" || r.estadoPago === "pending") {
+          if (r.aprobado) clearCart();
+          setResultado(r);
+        } else {
+          // Rechazado: el formulario se queda para intentar con otra tarjeta.
+          setError(r.mensaje);
+        }
+      } catch (err) {
+        console.error(err);
+        setError(err.message || "No se pudo procesar el pago.");
+      }
+    },
+    [pedido, clearCart],
+  );
+
   if (checkingAuth) {
     return <p>Comprobando sesión...</p>;
+  }
+
+  if (resultado) {
+    const aprobado = resultado.aprobado;
+    return (
+      <div className={`success ${aprobado ? "" : "en-revision"}`}>
+        <h2>{aprobado ? "¡Gracias por tu compra!" : "Tu pago está en revisión"}</h2>
+        <p>{resultado.mensaje}</p>
+        <p>
+          Pedido #{resultado.pedidoId} · Total ${resultado.total.toLocaleString("es-MX")}
+        </p>
+        <a href="/">Volver al catálogo</a>
+      </div>
+    );
   }
 
   if (cart.length === 0) {
     return (
       <div>
         <p>Tu carrito está vacío.</p>
-
         <a href="/">Volver al catálogo</a>
       </div>
     );
@@ -117,54 +133,44 @@ export default function Checkout() {
 
   return (
     <div className="checkout">
-      <form onSubmit={handleSubmit}>
-        <label>
-          Nombre
-          <input
-            type="text"
-            value={nombre}
-            onChange={(e) => setNombre(e.target.value)}
-            disabled={pedidoId !== null}
-            required
-          />
-        </label>
+      {!pedido ? (
+        <form onSubmit={continuarAlPago}>
+          <p className="checkout-paso">Paso 1 de 2 · Datos de envío</p>
 
-        <label>
-          Correo electrónico
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            disabled={pedidoId !== null}
-            required
-          />
-        </label>
+          <label>
+            Nombre
+            <input type="text" value={nombre} onChange={(e) => setNombre(e.target.value)} required />
+          </label>
 
-        <label>
-          Dirección de envío
-          <textarea
-            value={direccion}
-            onChange={(e) => setDireccion(e.target.value)}
-            disabled={pedidoId !== null}
-            required
-          />
-        </label>
+          <label>
+            Correo electrónico
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          </label>
 
-        {error && <p className="error">{error}</p>}
+          <label>
+            Dirección de envío
+            <textarea value={direccion} onChange={(e) => setDireccion(e.target.value)} required />
+          </label>
 
-        <button type="submit" disabled={loading}>
-          {loading
-            ? "Conectando con Mercado Pago..."
-            : pedidoId
-              ? "Reintentar pago"
-              : "Pagar con Mercado Pago"}
-        </button>
+          {error && <p className="error">{error}</p>}
 
-        <p className="checkout-nota">
-          Serás redirigido a Mercado Pago para pagar de forma segura con
-          tarjeta, efectivo o transferencia.
-        </p>
-      </form>
+          <button type="submit" disabled={loading}>
+            {loading ? "Creando pedido..." : "Continuar al pago"}
+          </button>
+        </form>
+      ) : (
+        <div className="checkout-pago">
+          <p className="checkout-paso">Paso 2 de 2 · Pago con tarjeta</p>
+          <p className="checkout-nota">
+            Pedido #{pedido.id}. Paga con tarjeta de crédito o débito. Los datos de tu tarjeta
+            los procesa Mercado Pago de forma segura; ALMĀS nunca los ve.
+          </p>
+
+          {error && <p className="error checkout-error">{error}</p>}
+
+          <FormularioTarjeta monto={pedido.total} email={email} onPagar={pagar} />
+        </div>
+      )}
 
       <aside className="order-summary">
         <h2>Resumen</h2>
@@ -175,16 +181,15 @@ export default function Checkout() {
               {item.nombre}
               {item.variante ? ` (${item.variante})` : ""} × {item.cantidad}
             </span>
-
-            <span>
-              ${(item.precio * item.cantidad).toLocaleString("es-MX")}
-            </span>
+            <span>${(item.precio * item.cantidad).toLocaleString("es-MX")}</span>
           </div>
         ))}
 
         <hr />
 
-        <strong>Total: ${total.toLocaleString("es-MX")}</strong>
+        <strong>
+          Total: ${(pedido ? pedido.total : totalCarrito).toLocaleString("es-MX")}
+        </strong>
       </aside>
     </div>
   );
@@ -199,10 +204,15 @@ const CREAR_PEDIDO = `
   }
 `;
 
-const CREAR_PREFERENCIA_PAGO = `
-  mutation CrearPreferenciaPago($pedidoId: Int!) {
-    crearPreferenciaPago(pedidoId: $pedidoId) {
-      initPoint
+const PAGAR_PEDIDO = `
+  mutation PagarPedido($data: PagoTarjetaInput!) {
+    pagarPedido(data: $data) {
+      pedidoId
+      aprobado
+      estatusPedido
+      estadoPago
+      mensaje
+      total
     }
   }
 `;

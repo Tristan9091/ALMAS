@@ -16,6 +16,7 @@ engine = create_engine(DATABASE_URL, echo=False)
 COLUMNAS_NUEVAS = [
     ("usuario", "rol", "VARCHAR NOT NULL DEFAULT 'cliente'"),
     ("producto", "activo", "BOOLEAN NOT NULL DEFAULT 1"),
+    ("pago", "order_id", "VARCHAR"),
 ]
 
 
