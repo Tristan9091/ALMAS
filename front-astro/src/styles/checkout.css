@@ -101,3 +101,35 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- Checkout API: pasos y formulario de tarjeta ---------- */
+
+.checkout-paso {
+  margin: 0;
+
+  color: var(--color-purple);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.checkout-pago {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.checkout-error {
+  padding: 0.8rem 1rem;
+  border-radius: 8px;
+  background: #fbe7ea;
+}
+
+.formulario-tarjeta {
+  min-height: 320px;
+}
+
+.success.en-revision {
+  border-top: 4px solid var(--color-gold);
+}
