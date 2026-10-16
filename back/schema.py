@@ -20,8 +20,8 @@ from models import (
     Usuario as UsuarioDB,
     Pago as PagoDB,
 )
-from payments import crear_preferencia, ErrorMercadoPago
-from webhooks import procesar_pago_mp
+from payments import crear_orden, ErrorMercadoPago
+from webhooks import aplicar_orden
 from panel import (
     ResumenAdminType,
     calcular_resumen,
@@ -249,11 +249,52 @@ class PedidoType:
     total: float
 
 
+@strawberry.input
+class PagoTarjetaInput:
+    """Lo que manda el formulario de Mercado Pago. Nunca incluye la tarjeta."""
+    pedido_id: int
+    token: str               # tarjeta convertida en token por Mercado Pago
+    metodo_pago: str         # marca: "visa", "master", "debvisa"...
+    tipo_pago: str           # "credit_card" o "debit_card"
+    cuotas: int = 1
+    email_pagador: str
+
+
 @strawberry.type
-class PreferenciaPagoType:
-    pago_id: int
-    preference_id: str
-    init_point: str
+class ResultadoPagoType:
+    pedido_id: int
+    aprobado: bool
+    estatus_pedido: str
+    estado_pago: str
+    mensaje: str
+    total: float
+
+
+# Mensajes para el cliente según el motivo que da Mercado Pago.
+MENSAJES_RECHAZO = {
+    "card_insufficient_amount": "La tarjeta no tiene fondos suficientes.",
+    "insufficient_amount": "La tarjeta no tiene fondos suficientes.",
+    "bad_filled_card_data": "Revisa los datos de la tarjeta.",
+    "bad_filled_security_code": "El código de seguridad no es correcto.",
+    "bad_filled_date": "La fecha de vencimiento no es correcta.",
+    "invalid_card_token": "Los datos de la tarjeta vencieron. Vuelve a escribirlos.",
+    "rejected_by_issuer": "Tu banco rechazó el pago. Prueba con otra tarjeta.",
+    "required_call_for_authorize": "Tu banco pide que autorices el pago por teléfono.",
+    "card_disabled": "La tarjeta está deshabilitada. Prueba con otra.",
+    "high_risk": "El pago fue rechazado por seguridad. Prueba con otra tarjeta.",
+    "max_attempts_exceeded": "Se superaron los intentos permitidos. Prueba con otra tarjeta.",
+    "amount_limit_exceeded": "El monto supera el límite de la tarjeta.",
+    "invalid_installments": "Esa tarjeta no acepta ese número de meses.",
+    "duplicated_payment": "Ya hiciste un pago igual hace un momento.",
+}
+
+
+def mensaje_resultado(estado: str, detalle: str | None) -> str:
+    if estado == "approved":
+        return "Tu pago fue aprobado. Ya estamos preparando tus joyas."
+    if estado in ("in_process", "pending"):
+        return "Tu pago está en revisión. Te avisaremos cuando Mercado Pago lo confirme."
+    return MENSAJES_RECHAZO.get(detalle or "", "No se pudo completar el pago. Prueba con otra tarjeta.")
 
 
 @strawberry.type
@@ -552,41 +593,29 @@ class Mutation:
             )
 
     @strawberry.mutation
-    def crear_preferencia_pago(self, info: Info, pedido_id: int) -> PreferenciaPagoType:
+    def pagar_pedido(self, info: Info, data: PagoTarjetaInput) -> ResultadoPagoType:
         """
-        Inicia el cobro de un pedido con Mercado Pago Checkout Pro.
+        Cobra un pedido con tarjeta (Checkout API vía Orders).
 
-        Regresa el init_point: el link al que el frontend debe mandar
-        al comprador para que pague.
+        El total sale del pedido guardado en la base; el navegador solo
+        manda el token de la tarjeta. Mercado Pago responde al momento.
         """
         usuario = obtener_usuario_actual(info)
 
         with Session(engine) as session:
-            pedido = session.get(PedidoDB, pedido_id)
+            pedido = session.get(PedidoDB, data.pedido_id)
 
             # Mismo mensaje en ambos casos para no revelar pedidos ajenos.
             if pedido is None or pedido.usuario_id != usuario.id:
                 raise ValueError("Pedido no encontrado.")
-
             if pedido.estatus != "pendiente":
                 raise ValueError("Este pedido ya no está pendiente de pago.")
-
-            ya_aprobado = session.exec(
-                select(PagoDB).where(
-                    PagoDB.pedido_id == pedido.id,
-                    PagoDB.estado == "approved",
-                )
-            ).first()
-            if ya_aprobado:
-                raise ValueError("Este pedido ya fue pagado.")
 
             detalles = session.exec(
                 select(DetallePedidoDB).where(DetallePedidoDB.pedido_id == pedido.id)
             ).all()
             if not detalles:
                 raise ValueError("El pedido no tiene productos.")
-
-            items = []
             for d in detalles:
                 producto = session.get(ProductoDB, d.producto_id)
                 if producto is None or not producto.activo:
@@ -594,77 +623,54 @@ class Mutation:
                 if d.cantidad > producto.stock:
                     raise ValueError(f"Ya no hay stock suficiente de {producto.nombre}.")
 
-                titulo = producto.nombre
-                if d.variante_id is not None:
-                    variante = session.get(VarianteDB, d.variante_id)
-                    if variante:
-                        titulo = f"{producto.nombre} ({variante.tipo} {variante.valor})"
-
-                items.append({
-                    "id": producto.id,
-                    "title": titulo,
-                    "quantity": d.cantidad,
-                    "unit_price": d.precio_unitario,
-                })
-
-            try:
-                preferencia = crear_preferencia(
-                    pedido_id=pedido.id,
-                    items=items,
-                    email_comprador=pedido.email_comprador,
+            # Si un cobro anterior sigue en revisión, no se permite otro:
+            # podrían aprobarse los dos y cobrarle doble al cliente.
+            en_revision = session.exec(
+                select(PagoDB).where(
+                    PagoDB.pedido_id == pedido.id,
+                    PagoDB.estado.in_(["in_process", "pending"]),
                 )
-            except ErrorMercadoPago as error:
-                # El detalle técnico queda en la consola del servidor;
-                # al cliente solo le llega un mensaje general.
-                print(f"[Mercado Pago] Pedido {pedido.id}: {error}")
+            ).first()
+            if en_revision:
                 raise ValueError(
-                    "No se pudo iniciar el pago con Mercado Pago. Intenta de nuevo."
+                    "Ya hay un pago de este pedido en revisión. Espera la confirmación de Mercado Pago."
                 )
 
-            pago = PagoDB(
-                pedido_id=pedido.id,
-                proveedor="mercadopago",
-                preference_id=preferencia["id"],
-                monto=pedido.total,
-                moneda="MXN",
-                estado="creado",
-            )
-            session.add(pago)
-            session.commit()
-            session.refresh(pago)
+            pedido_id, total = pedido.id, pedido.total
 
-            return PreferenciaPagoType(
-                pago_id=pago.id,
-                preference_id=preferencia["id"],
-                init_point=preferencia["init_point"],
-            )
-
-    @strawberry.mutation
-    def sincronizar_pago(self, info: Info, pedido_id: int, payment_id: str) -> EstadoPagoType:
-        """
-        Verifica un pago con Mercado Pago cuando el comprador regresa a la tienda.
-
-        El payment_id llega en la URL de retorno, pero no se confía en ella:
-        el estado real se consulta a Mercado Pago. Sirve en local, donde
-        los webhooks no pueden llegar, y como respaldo si un webhook se retrasa.
-        """
-        usuario = obtener_usuario_actual(info)
-
-        with Session(engine) as session:
-            pedido = session.get(PedidoDB, pedido_id)
-            if pedido is None or pedido.usuario_id != usuario.id:
-                raise ValueError("Pedido no encontrado.")
+        if data.tipo_pago not in ("credit_card", "debit_card"):
+            raise ValueError("Solo se aceptan tarjetas de crédito o débito.")
+        if not data.token.strip():
+            raise ValueError("Faltan los datos de la tarjeta.")
 
         try:
-            resumen = procesar_pago_mp(payment_id, pedido_esperado=pedido_id)
+            orden = crear_orden(
+                pedido_id=pedido_id,
+                monto=total,
+                token=data.token.strip(),
+                metodo_pago=data.metodo_pago,
+                tipo_pago=data.tipo_pago,
+                cuotas=max(1, data.cuotas),
+                email_pagador=data.email_pagador,
+            )
         except ErrorMercadoPago as error:
+            # El detalle técnico queda en la consola del servidor;
+            # al cliente solo le llega un mensaje general.
             print(f"[Mercado Pago] Pedido {pedido_id}: {error}")
-            raise ValueError("No se pudo verificar el pago. Intenta de nuevo en unos minutos.")
+            raise ValueError("No se pudo procesar el pago con Mercado Pago. Intenta de nuevo.")
 
+        resumen = aplicar_orden(orden, pedido_esperado=pedido_id)
         if resumen is None:
-            raise ValueError("No se encontró información de este pago.")
+            raise ValueError("No se pudo registrar el resultado del pago.")
 
-        return EstadoPagoType(**resumen)
+        return ResultadoPagoType(
+            pedido_id=pedido_id,
+            aprobado=resumen["estatus_pedido"] == "pagado",
+            estatus_pedido=resumen["estatus_pedido"],
+            estado_pago=resumen["estado_pago"],
+            mensaje=mensaje_resultado(resumen["estado_pago"], resumen["estado_detalle"]),
+            total=resumen["total"],
+        )
 
     @strawberry.mutation
     def registrar_usuario(

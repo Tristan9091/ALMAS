@@ -92,6 +92,8 @@ class Pago(SQLModel, table=True):
 
     proveedor: str = "mercadopago"
     preference_id: Optional[str] = Field(default=None, index=True)
+    # ID de la orden en Checkout API (ej. "ORD01..."). Una orden por intento.
+    order_id: Optional[str] = Field(default=None, index=True)
     payment_id: Optional[str] = Field(default=None, index=True, unique=True)
 
     monto: float
