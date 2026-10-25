@@ -4,6 +4,7 @@ import { useAdmin } from "./useAdmin";
 import EstadoAcceso from "./EstadoAcceso";
 import EstadoBadge from "./EstadoBadge";
 import { dinero, fechaHora } from "./formato";
+import { useRefrescarEnVivo } from "./useRefrescarEnVivo";
 
 const PAGOS_QUERY = `
   query {
@@ -65,10 +66,13 @@ export default function PagosAdmin() {
       setCargando(false);
     }
   }, []);
-
+  
   useEffect(() => {
     if (acceso.estado === "listo") cargar();
   }, [acceso.estado, cargar]);
+
+  // Los intentos de pago cambian con los eventos de pago.
+  useRefrescarEnVivo(cargar, ["pago_"]);
 
   const visibles = useMemo(() => {
     if (!pagos) return [];

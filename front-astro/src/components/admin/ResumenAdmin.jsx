@@ -5,6 +5,7 @@ import EstadoAcceso from "./EstadoAcceso";
 import EstadoBadge from "./EstadoBadge";
 import GraficaVentas from "./GraficaVentas";
 import { dinero, fechaHora } from "./formato";
+import { useRefrescarEnVivo } from "./useRefrescarEnVivo";
 
 const DIAS = 30;
 
@@ -50,6 +51,9 @@ export default function ResumenAdmin() {
     if (acceso.estado === "listo") cargar();
   }, [acceso.estado, cargar]);
 
+
+  useRefrescarEnVivo(cargar);
+
   if (acceso.estado !== "listo") {
     return <EstadoAcceso acceso={acceso} />;
   }
@@ -83,6 +87,7 @@ export default function ResumenAdmin() {
       ) : (
         <>
           <section className="tarjetas" aria-label="Indicadores principales">
+
             <Tarjeta
               etiqueta="Ventas confirmadas"
               valor={dinero(resumen.ventasTotales)}
@@ -117,9 +122,8 @@ export default function ResumenAdmin() {
             <Tarjeta
               etiqueta="Stock bajo"
               valor={resumen.productosStockBajo}
-              detalle={`${resumen.umbralStockBajo} piezas o menos · ${resumen.productosAgotados} ${
-                resumen.productosAgotados === 1 ? "agotado" : "agotados"
-              }`}
+              detalle={`${resumen.umbralStockBajo} piezas o menos · ${resumen.productosAgotados} ${resumen.productosAgotados === 1 ? "agotado" : "agotados"
+                }`}
               alerta={resumen.productosStockBajo > 0 ? "Revisar" : null}
             />
           </section>

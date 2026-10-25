@@ -50,7 +50,16 @@ const ETIQUETAS_PAGO = {
   enviando: "Procesando",
   verificacion: "En verificación",
 };
+// Mismo criterio que usa Checkout: solo se puede retomar el pago si
+// no hay un cobro abierto. Si hay duda, el backend lo bloquea de todos modos.
+const PAGOS_REANUDABLES = [null, "rejected", "cancelled"];
 
+function puedeContinuarPago(pedido) {
+  return (
+    pedido.estatus === "pendiente" &&
+    PAGOS_REANUDABLES.includes(pedido.estadoPago ?? null)
+  );
+}
 function tono(estado) {
   if (["pagado", "entregado", "approved"].includes(estado)) return "ok";
   if (["cancelado", "reembolsado", "rejected", "cancelled", "refunded", "charged_back"].includes(estado)) return "error";
@@ -152,6 +161,22 @@ export default function MisPedidos() {
                   <div><span>Pedido</span><Estado estado={pedido.estatus} tipo="pedido" /></div>
                   <div><span>Pago</span><Estado estado={pedido.estadoPago} tipo="pago" /></div>
                 </div>
+                {puedeContinuarPago(pedido) && (
+                  <div className="mis-pedidos__accion">
+                    <a
+                      className="mis-pedidos__pagar"
+                      href={`/checkout?pedido=${pedido.id}`}
+                    >
+                      Continuar con el pago
+                    </a>
+                    {pedido.estadoPago && (
+                      <small>
+                        El intento anterior no se completó. Puedes pagar con
+                        la misma u otra tarjeta.
+                      </small>
+                    )}
+                  </div>
+                )}
                 <button
                   className="mis-pedidos__detalle-btn"
                   type="button"
@@ -222,6 +247,9 @@ export default function MisPedidos() {
         .mis-pedidos__vacio p{color:#786777;line-height:1.6}
         .mis-pedidos__vacio button,.mis-pedidos__comprar{display:inline-block;margin-top:12px;padding:11px 20px;background:var(--color-purple,#8f1268);border:0;border-radius:8px;color:#fff;text-decoration:none;font-weight:700}
         @media(max-width:550px){.mis-pedidos{padding:26px 16px 60px}.mis-pedidos__fila{padding:18px 16px 14px}.mis-pedidos__estados{padding:0 16px 18px}.mis-pedidos__detalle{padding:18px 16px}.mis-pedidos__detalle-btn{padding:13px 16px}.mis-pedidos__importe{font-size:18px}}
+                .mis-pedidos__accion{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;padding:0 24px 20px}
+        .mis-pedidos__pagar{display:inline-block;padding:10px 18px;background:var(--color-purple,#8f1268);border-radius:8px;color:#fff;text-decoration:none;font-weight:700}
+        .mis-pedidos__accion small{color:#796b79}
       `}</style>
     </section>
   );
