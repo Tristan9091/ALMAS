@@ -4,6 +4,7 @@ import { useAdmin } from "./useAdmin";
 import EstadoAcceso from "./EstadoAcceso";
 import FormularioProducto from "./FormularioProducto";
 import { dinero } from "./formato";
+import { useRefrescarEnVivo } from "./useRefrescarEnVivo";
 
 const STOCK_BAJO = 3;
 
@@ -72,6 +73,9 @@ export default function ProductosAdmin() {
     if (acceso.estado === "listo") cargar();
   }, [acceso.estado, cargar]);
 
+  // El stock cambia al cobrar o cancelar pedidos y al ajustarlo a mano.
+  useRefrescarEnVivo(cargar, ["stock_", "pedido_", "pago_"]);
+  
   const nombreCategoria = useMemo(
     () => Object.fromEntries(categorias.map((c) => [c.id, c.nombre])),
     [categorias],
@@ -120,11 +124,11 @@ export default function ProductosAdmin() {
   const conteo = (f) =>
     productos
       ? productos.filter((p) =>
-          f === "activos" ? p.activo
+        f === "activos" ? p.activo
           : f === "desactivados" ? !p.activo
-          : f === "stock" ? p.activo && p.stock <= STOCK_BAJO
-          : true,
-        ).length
+            : f === "stock" ? p.activo && p.stock <= STOCK_BAJO
+              : true,
+      ).length
       : 0;
 
   return (

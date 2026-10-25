@@ -4,6 +4,7 @@ import { useAdmin } from "./useAdmin";
 import EstadoAcceso from "./EstadoAcceso";
 import EstadoBadge from "./EstadoBadge";
 import { dinero, fechaHora } from "./formato";
+import { useRefrescarEnVivo } from "./useRefrescarEnVivo";
 
 // Los campos pagoId y orderId vienen de PedidoAdminType en back/panel.py.
 const PEDIDOS_QUERY = `
@@ -95,6 +96,9 @@ export default function PedidosAdmin() {
     if (acceso.estado === "listo") cargar();
   }, [acceso.estado, cargar]);
 
+  // Se actualiza sola cuando hay novedades de pedidos o pagos.
+  useRefrescarEnVivo(cargar, ["pedido_", "pago_"]);
+
   const visibles = useMemo(() => {
     if (!pedidos) return [];
     const condicion = FILTROS.find(([v]) => v === filtro)?.[2] ?? FILTROS[0][2];
@@ -178,10 +182,10 @@ export default function PedidosAdmin() {
     const frase = `SIN COBRO ${pedido.pagoId}`;
     const confirmacion = window.prompt(
       "ATENCIÓN: esta acción devuelve al catálogo el inventario reservado.\n\n" +
-        "Úsala ÚNICAMENTE después de verificar en Mercado Pago que el intento " +
-        "no produjo ningún cobro. No basta con que la solicitud haya fallado " +
-        "o no haya respondido.\n\n" +
-        `Si ya lo comprobaste, escribe exactamente:\n${frase}`,
+      "Úsala ÚNICAMENTE después de verificar en Mercado Pago que el intento " +
+      "no produjo ningún cobro. No basta con que la solicitud haya fallado " +
+      "o no haya respondido.\n\n" +
+      `Si ya lo comprobaste, escribe exactamente:\n${frase}`,
     );
     if (confirmacion !== frase) return;
 

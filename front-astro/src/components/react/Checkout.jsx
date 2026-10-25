@@ -26,6 +26,8 @@ export default function Checkout() {
   const [error, setError] = useState(null);
   const [pedido, setPedido] = useState(null);
   const [resultado, setResultado] = useState(null);
+  const [detallesPedido, setDetallesPedido] = useState(null); // productos del pedido retomado
+  const [errorReanudar, setErrorReanudar] = useState(null);
 
   // Evita que el Brick envíe dos pagos antes de actualizar React.
   const cobroEnCurso = useRef(false);
@@ -36,6 +38,36 @@ export default function Checkout() {
   );
 
   useEffect(() => {
+    // Un pedido solo se puede retomar si no hay un cobro abierto.
+    const PAGOS_REANUDABLES = [null, "rejected", "cancelled"];
+
+    const reanudarPedido = async () => {
+      const id = Number(new URLSearchParams(window.location.search).get("pedido"));
+      if (!id) return;
+
+      try {
+        const data = await graphqlAuthRequest(MIS_PEDIDOS_QUERY);
+        const existente = data.misPedidos.find((p) => p.id === id);
+
+        if (
+          !existente ||
+          existente.estatus !== "pendiente" ||
+          !PAGOS_REANUDABLES.includes(existente.estadoPago ?? null)
+        ) {
+          setErrorReanudar(
+            "Este pedido ya no se puede pagar desde aquí. Revisa su estado en Mis pedidos.",
+          );
+          return;
+        }
+
+        setPedido({ id: existente.id, total: existente.total });
+        setDetallesPedido(existente.detalles);
+      } catch (err) {
+        console.error(err);
+        setErrorReanudar(err.message || "No se pudo cargar el pedido.");
+      }
+    };
+
     const verificarSesion = async () => {
       if (!localStorage.getItem("almas-token")) {
         window.location.href = "/login";
@@ -46,13 +78,16 @@ export default function Checkout() {
         const data = await graphqlAuthRequest(ME_QUERY);
         setNombre((actual) => actual || data.me.nombre);
         setEmail((actual) => actual || data.me.email);
-        setCheckingAuth(false);
       } catch (err) {
         console.error(err);
         localStorage.removeItem("almas-token");
         localStorage.removeItem("almas-user");
         window.location.href = "/login";
+        return;
       }
+
+      await reanudarPedido();
+      setCheckingAuth(false);
     };
 
     verificarSesion();
@@ -127,7 +162,7 @@ export default function Checkout() {
 
         // Confirmado, pendiente, incierto o incidencia: ocultar el Brick
         // para que no se intente otro cobro sobre el mismo pedido.
-        if (r.aprobado && !incidencia) {
+        if (r.aprobado && !incidencia && !detallesPedido) {
           clearCart();
         }
         setResultado(r);
@@ -151,7 +186,7 @@ export default function Checkout() {
         cobroEnCurso.current = false;
       }
     },
-    [pedido, clearCart],
+    [pedido, clearCart, detallesPedido],
   );
 
   if (checkingAuth) {
@@ -188,7 +223,17 @@ export default function Checkout() {
     );
   }
 
-  if (cart.length === 0) {
+    if (errorReanudar) {
+    return (
+      <div>
+        <p className="error">{errorReanudar}</p>
+        <a href="/mis-pedidos">Ir a Mis pedidos</a>
+      </div>
+    );
+  }
+
+  if (cart.length === 0 && !pedido) {
+
     return (
       <div>
         <p>Tu carrito está vacío.</p>
@@ -260,7 +305,16 @@ export default function Checkout() {
       <aside className="order-summary">
         <h2>Resumen</h2>
 
-        {cart.map((item) => (
+                {(detallesPedido
+          ? detallesPedido.map((d, i) => ({
+              cartKey: `p-${i}`,
+              nombre: d.nombreProducto,
+              variante: d.variante,
+              cantidad: d.cantidad,
+              precio: d.precioUnitario,
+            }))
+          : cart
+        ).map((item) => (
           <div className="summary-item" key={item.cartKey}>
             <span>
               {item.nombre}
@@ -311,6 +365,17 @@ const ME_QUERY = `
       id
       nombre
       email
+    }
+  }
+`;
+const MIS_PEDIDOS_QUERY = `
+  query {
+    misPedidos {
+      id
+      estatus
+      estadoPago
+      total
+      detalles { nombreProducto variante cantidad precioUnitario }
     }
   }
 `;

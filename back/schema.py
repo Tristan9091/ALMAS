@@ -6,7 +6,7 @@ transacción SQLite, ANTES de contactar a Mercado Pago.
 """
 
 from datetime import datetime
-from typing import List, Optional
+from typing import AsyncGenerator, List, Optional
 
 import strawberry
 from sqlmodel import Session, select
@@ -20,6 +20,7 @@ from auth import (
     verify_password,
 )
 from database import engine, transaccion_pago
+from events import publicar, suscribir
 from models import (
     Categoria as CategoriaDB,
     DetallePedido as DetallePedidoDB,
@@ -31,6 +32,7 @@ from models import (
     ahora,
 )
 from panel import (
+    STOCK_BAJO,
     ClienteAdminType,
     PagoAdminType,
     PedidoAdminType,
@@ -431,9 +433,21 @@ class AuthPayload:
     usuario: UsuarioType
 
 
+def _token_desde_contexto(info: Info) -> Optional[str]:
+    """HTTP: header Authorization. WebSocket: connection_params (el navegador
+    no puede poner headers en un WebSocket)."""
+    params = info.context.get("connection_params")
+    if isinstance(params, dict):
+        autorizacion = params.get("authorization") or params.get("Authorization")
+        if autorizacion:
+            return get_token_from_header(str(autorizacion))
+    return get_token_from_header(
+        info.context["request"].headers.get("Authorization")
+    )
+
+
 def obtener_usuario_actual(info: Info) -> UsuarioDB:
-    authorization = info.context["request"].headers.get("Authorization")
-    token = get_token_from_header(authorization)
+    token = _token_desde_contexto(info)
     if not token:
         raise ValueError("No autenticado.")
 
@@ -557,7 +571,9 @@ class Mutation:
     @strawberry.mutation
     def cancelar_pedido(self, info: Info, id: int) -> PedidoAdminType:
         requerir_admin(info)
-        return cancelar_pedido_admin(id)
+        pedido = cancelar_pedido_admin(id)
+        publicar("pedido_cancelado", f"Pedido #{id} cancelado", id)
+        return pedido
 
     @strawberry.mutation
     def cambiar_estado_cliente(
@@ -596,6 +612,11 @@ class Mutation:
             session.add(producto)
             session.flush()
             resultado = producto_a_type(producto, session)
+        if nuevo_stock <= STOCK_BAJO:
+            publicar(
+                "stock_bajo",
+                f"Stock bajo: {resultado.nombre} ({nuevo_stock} pzas)",
+            )
         return resultado
 
     @strawberry.mutation
@@ -682,6 +703,12 @@ class Mutation:
                 estatus=pedido.estatus,
                 total=pedido.total,
             )
+        publicar(
+            "pedido_creado",
+            f"Nuevo pedido #{resultado.id} de {resultado.nombre_comprador} "
+            f"por ${resultado.total:,.2f}",
+            resultado.id,
+        )
         return resultado
 
     @strawberry.mutation
@@ -731,6 +758,7 @@ class Mutation:
             if not detalles:
                 raise ValueError("El pedido no tiene productos.")
 
+            bajos: list[tuple[str, int]] = []
             cantidades: dict[int, int] = {}
             for detalle in detalles:
                 if detalle.cantidad <= 0:
@@ -751,6 +779,8 @@ class Mutation:
                     )
                 producto.stock -= cantidad
                 session.add(producto)
+                if producto.stock <= STOCK_BAJO:
+                    bajos.append((producto.nombre, producto.stock))
 
             # Conservar un único registro por intento y su reserva.
             pago = PagoDB(
@@ -764,6 +794,13 @@ class Mutation:
             session.flush()
             intento_id = pago.id
             pedido_id, total = pedido.id, pedido.total
+
+        # Ya se confirmó la reserva: avisar de los productos que quedaron bajos.
+        for nombre_producto, existencias in bajos:
+            publicar(
+                "stock_bajo",
+                f"Stock bajo: {nombre_producto} ({existencias} pzas)",
+            )
 
         try:
             orden = crear_orden(
@@ -891,7 +928,9 @@ class Mutation:
             session.add(nuevo)
             session.commit()
             session.refresh(nuevo)
-            return usuario_a_type(nuevo)
+            resultado = usuario_a_type(nuevo)
+        publicar("cliente_nuevo", f"Nuevo cliente registrado: {nombre}")
+        return resultado
 
     @strawberry.mutation
     def login(self, data: LoginInput) -> AuthPayload:
@@ -910,4 +949,28 @@ class Mutation:
             return AuthPayload(token=token, usuario=usuario_a_type(usuario))
 
 
-schema = strawberry.Schema(query=Query, mutation=Mutation)
+@strawberry.type
+class EventoBackoffice:
+    """Aviso en tiempo real para el panel de administración."""
+
+    tipo: str
+    mensaje: str
+    pedido_id: Optional[int]
+    fecha: datetime
+
+
+@strawberry.type
+class Subscription:
+    @strawberry.subscription
+    async def eventos_backoffice(
+        self, info: Info
+    ) -> AsyncGenerator[EventoBackoffice, None]:
+        # Solo administradores. El token llega en connection_params.
+        requerir_admin(info)
+        async for evento in suscribir():
+            yield EventoBackoffice(**evento)
+
+
+schema = strawberry.Schema(
+    query=Query, mutation=Mutation, subscription=Subscription
+)

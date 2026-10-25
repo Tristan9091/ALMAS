@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.requests import HTTPConnection
 from strawberry.fastapi import GraphQLRouter
 
 from crear_admin import asegurar_admin_desde_entorno
@@ -32,7 +33,9 @@ app.add_middleware(
 )
  
  
-async def get_context(request: Request):
+async def get_context(request: HTTPConnection):
+    # HTTPConnection es la base común de Request (HTTP) y WebSocket,
+    # así el mismo contexto sirve para queries, mutations y subscriptions.
     return {
         "request": request
     }

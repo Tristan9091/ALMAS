@@ -13,6 +13,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlmodel import Session, select
 
 from database import transaccion_pago
+from events import publicar
 from models import DetallePedido, Pago, Pedido, Producto, ahora
 from payments import ErrorMercadoPago, obtener_orden, validar_firma_webhook
 
@@ -145,6 +146,7 @@ def liberar_reserva(intento_id: int, revision_admin: bool = False) -> bool:
 
 def marcar_pago_incierto(intento_id: int) -> None:
     """Conserva la reserva cuando no sabemos si Mercado Pago cobró."""
+    pedido_id = None
     with transaccion_pago() as session:
         pago = session.get(Pago, intento_id)
         if pago is not None and pago.estado == "enviando":
@@ -152,6 +154,14 @@ def marcar_pago_incierto(intento_id: int) -> None:
             pago.estado_detalle = "resultado_desconocido"
             pago.fecha_actualizacion = ahora()
             session.add(pago)
+            pedido_id = pago.pedido_id
+    # Fuera del "with": ya se confirmó la transacción.
+    if pedido_id is not None:
+        publicar(
+            "pago_por_verificar",
+            f"Pago por verificar del pedido #{pedido_id}",
+            pedido_id,
+        )
 
 
 def _resumen_orden(pedido: Pedido, pago: Pago) -> dict:
@@ -179,22 +189,47 @@ def _referencia_pedido(referencia: str) -> tuple[int, Optional[int]]:
     return pedido_id, intento_id
 
 
-def aplicar_orden(
+def _evento_de_pago(pedido_id: int, estatus_pedido: str, estado_pago: str) -> tuple:
+    """Traduce un cambio de pago a un evento (tipo, mensaje, pedido_id)."""
+    if estatus_pedido.startswith("incidencia_"):
+        return (
+            "pago_incidencia",
+            f"Incidencia en el pedido #{pedido_id} ({estatus_pedido})",
+            pedido_id,
+        )
+    if estatus_pedido == "pagado":
+        return ("pago_aprobado", f"Pago aprobado del pedido #{pedido_id}", pedido_id)
+    if estado_pago in ("rejected", "cancelled"):
+        return ("pago_rechazado", f"Pago rechazado del pedido #{pedido_id}", pedido_id)
+    if estado_pago in ("refunded", "charged_back"):
+        return ("pago_reembolsado", f"Pago reembolsado del pedido #{pedido_id}", pedido_id)
+    return (
+        "pago_actualizado",
+        f"Pago del pedido #{pedido_id}: {estado_pago}",
+        pedido_id,
+    )
+
+
+def _aplicar_orden(
     orden: dict,
     pedido_esperado: Optional[int] = None,
-) -> Optional[dict]:
-    """Sincroniza una orden verificada con la base de datos (transacción única)."""
+) -> tuple[Optional[dict], Optional[tuple]]:
+    """Sincroniza una orden verificada con la base de datos (transacción única).
+
+    Devuelve (resumen, evento). El evento solo existe si algo cambió de verdad
+    y lo publica aplicar_orden() DESPUÉS de confirmar la transacción.
+    """
     order_id = str(orden.get("id") or "").strip()
     referencia = str(orden.get("external_reference") or "").strip()
     if not order_id:
         print("[Pagos] Orden sin identificador.")
-        return None
+        return None, None
 
     try:
         pedido_id, intento_id = _referencia_pedido(referencia)
     except ValueError as error:
         print(f"[Pagos] Orden {order_id}: {error}")
-        return None
+        return None, None
 
     if pedido_esperado is not None and pedido_id != pedido_esperado:
         raise ValueError("La orden no corresponde al pedido solicitado.")
@@ -247,18 +282,19 @@ def aplicar_orden(
 
         estado_previo = pago.estado
         detalle_previo = pago.estado_detalle
+        estatus_previo = pedido.estatus
 
         # Una orden aprobada no retrocede por notificaciones retrasadas.
         if estado_previo == "approved" and estado in {
             "approved", "creado", "pending", "in_process", "rejected", "cancelled"
         }:
-            return _resumen_orden(pedido, pago)
+            return _resumen_orden(pedido, pago), None
         if estado_previo in ("refunded", "charged_back"):
-            return _resumen_orden(pedido, pago)
+            return _resumen_orden(pedido, pago), None
         if estado_previo in ("rejected", "cancelled") and estado in {
             "creado", "pending", "in_process"
         }:
-            return _resumen_orden(pedido, pago)
+            return _resumen_orden(pedido, pago), None
 
         pago.order_id = order_id
         if payment_id:
@@ -357,7 +393,21 @@ def aplicar_orden(
                 session.add(pedido)
             # Una incidencia abierta no se cierra automáticamente.
 
-        return _resumen_orden(pedido, pago)
+        evento = None
+        if pago.estado != estado_previo or pedido.estatus != estatus_previo:
+            evento = _evento_de_pago(pedido.id, pedido.estatus, pago.estado)
+        return _resumen_orden(pedido, pago), evento
+
+
+def aplicar_orden(
+    orden: dict,
+    pedido_esperado: Optional[int] = None,
+) -> Optional[dict]:
+    """Sincroniza la orden y, ya confirmada la transacción, avisa al backoffice."""
+    resumen, evento = _aplicar_orden(orden, pedido_esperado)
+    if evento is not None:
+        publicar(*evento)
+    return resumen
 
 
 def procesar_orden_mp(order_id: str) -> Optional[dict]:
