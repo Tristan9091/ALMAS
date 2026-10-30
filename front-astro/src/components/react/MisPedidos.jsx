@@ -21,6 +21,12 @@ const MIS_PEDIDOS = `
   }
 `;
 
+const CANCELAR_MI_PEDIDO = `
+  mutation CancelarMiPedido($pedidoId: Int!) {
+    cancelarMiPedido(pedidoId: $pedidoId)
+  }
+`;
+
 const ETIQUETAS_PEDIDO = {
   pendiente: "Pendiente de pago",
   pagado: "Pagado",
@@ -60,15 +66,34 @@ function puedeContinuarPago(pedido) {
     PAGOS_REANUDABLES.includes(pedido.estadoPago ?? null)
   );
 }
+
+function esPagoPendiente(pedido) {
+  return pedido.estatus === "pendiente";
+}
+
 function tono(estado) {
   if (["pagado", "entregado", "approved"].includes(estado)) return "ok";
-  if (["cancelado", "reembolsado", "rejected", "cancelled", "refunded", "charged_back"].includes(estado)) return "error";
-  if (estado?.startsWith("incidencia_") || estado === "verificacion") return "error";
+  if (
+    [
+      "cancelado",
+      "reembolsado",
+      "rejected",
+      "cancelled",
+      "refunded",
+      "charged_back",
+    ].includes(estado)
+  )
+    return "error";
+  if (estado?.startsWith("incidencia_") || estado === "verificacion")
+    return "error";
   return "pending";
 }
 
 function moneda(valor) {
-  return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(Number(valor) || 0);
+  return new Intl.NumberFormat("es-MX", {
+    style: "currency",
+    currency: "MXN",
+  }).format(Number(valor) || 0);
 }
 
 function fechaLegible(valor) {
@@ -76,15 +101,23 @@ function fechaLegible(valor) {
   const fecha = new Date(valor);
   if (Number.isNaN(fecha.getTime())) return "Fecha no disponible";
   return new Intl.DateTimeFormat("es-MX", {
-    dateStyle: "medium", timeStyle: "short", timeZone: "America/Mexico_City",
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "America/Mexico_City",
   }).format(fecha);
 }
 
 function Estado({ estado, tipo }) {
   const etiquetas = tipo === "pago" ? ETIQUETAS_PAGO : ETIQUETAS_PEDIDO;
-  return <span className={`mis-pedidos__estado mis-pedidos__estado--${tono(estado)}`}>
-    {estado ? (etiquetas[estado] || estado.replaceAll("_", " ")) : "Sin pago registrado"}
-  </span>;
+  return (
+    <span
+      className={`mis-pedidos__estado mis-pedidos__estado--${tono(estado)}`}
+    >
+      {estado
+        ? etiquetas[estado] || estado.replaceAll("_", " ")
+        : "Sin pago registrado"}
+    </span>
+  );
 }
 
 export default function MisPedidos() {
@@ -92,6 +125,9 @@ export default function MisPedidos() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
   const [abiertos, setAbiertos] = useState({});
+  const [seccion, setSeccion] = useState("compras");
+  const [cancelando, setCancelando] = useState(null);
+  const [errorCancelacion, setErrorCancelacion] = useState("");
 
   async function cargar() {
     if (!localStorage.getItem("almas-token")) {
@@ -110,7 +146,47 @@ export default function MisPedidos() {
     }
   }
 
-  useEffect(() => { cargar(); }, []);
+  useEffect(() => {
+    cargar();
+  }, []);
+
+  const compras = pedidos.filter((pedido) => !esPagoPendiente(pedido));
+
+  const pagosPendientes = pedidos.filter(esPagoPendiente);
+
+  const pedidosVisibles = seccion === "compras" ? compras : pagosPendientes;
+
+  async function cancelarPedido(pedido) {
+    if (cancelando !== null) return;
+
+    const confirmar = window.confirm(
+      `¿Quieres cancelar el pedido #${pedido.id}?\n\n` +
+        "Esta accion no se puede deshacer. " +
+        "Si quieres comprar estos productos despues, " +
+        "tendras que hacer un nuevo pedido.",
+    );
+
+    if (!confirmar) return;
+
+    setCancelando(pedido.id);
+    setErrorCancelacion("");
+
+    try {
+      const resultado = await graphqlAuthRequest(CANCELAR_MI_PEDIDO, {
+        pedidoId: pedido.id,
+      });
+
+      if (resultado?.cancelarMiPedido !== true) {
+        throw new Error("No se pudo confirmar la cancelacion.");
+      }
+
+      await cargar();
+    } catch (err) {
+      setErrorCancelacion(err?.message || "No se pudo cancelar el pedido.");
+    } finally {
+      setCancelando(null);
+    }
+  }
 
   return (
     <section className="mis-pedidos" aria-label="Historial de pedidos">
@@ -118,48 +194,114 @@ export default function MisPedidos() {
         <div>
           <p className="mis-pedidos__eyebrow">TU CUENTA</p>
           <h1>Mis pedidos</h1>
-          <p className="mis-pedidos__subtitulo">Consulta tus compras y el estado de cada pedido.</p>
+          <p className="mis-pedidos__subtitulo">
+            Consulta tus compras y el estado de cada pedido.
+          </p>
         </div>
-        <button className="mis-pedidos__actualizar" type="button" onClick={cargar} disabled={cargando}>
+        <button
+          className="mis-pedidos__actualizar"
+          type="button"
+          onClick={cargar}
+          disabled={cargando}
+        >
           {cargando ? "Actualizando…" : "Actualizar"}
         </button>
       </div>
 
-      {cargando ? <p className="mis-pedidos__mensaje" role="status">Cargando tus pedidos…</p> : null}
+      <div
+        className="mis-pedidos__pestanas"
+        role="group"
+        aria-label="Secciones de pedidos"
+      >
+        <button
+          type="button"
+          className={seccion === "compras" ? "activa" : ""}
+          aria-pressed={seccion === "compras"}
+          onClick={() => setSeccion("compras")}
+        >
+          Mis compras ({compras.length})
+        </button>
+
+        <button
+          type="button"
+          className={seccion === "pendientes" ? "activa" : ""}
+          aria-pressed={seccion === "pendientes"}
+          onClick={() => setSeccion("pendientes")}
+        >
+          Pagos pendientes ({pagosPendientes.length})
+        </button>
+      </div>
+
+      {errorCancelacion && (
+        <p className="mis-pedidos__error-cancelacion" role="alert">
+          {errorCancelacion}
+        </p>
+      )}
+
+      {cargando ? (
+        <p className="mis-pedidos__mensaje" role="status">
+          Cargando tus pedidos…
+        </p>
+      ) : null}
 
       {!cargando && error ? (
         <div className="mis-pedidos__vacio" role="alert">
           <h2>No pudimos consultar tus pedidos</h2>
           <p>{error}</p>
-          <button type="button" onClick={cargar}>Intentar de nuevo</button>
-          <p>Si tu sesión venció, <a href="/login">vuelve a iniciar sesión</a>.</p>
+          <button type="button" onClick={cargar}>
+            Intentar de nuevo
+          </button>
+          <p>
+            Si tu sesión venció, <a href="/login">vuelve a iniciar sesión</a>.
+          </p>
         </div>
       ) : null}
 
-      {!cargando && !error && pedidos.length === 0 ? (
+      {!cargando && !error && pedidosVisibles.length === 0 ? (
         <div className="mis-pedidos__vacio">
-          <h2>Aún no tienes pedidos</h2>
-          <p>Cuando hagas tu primera compra, podrás consultar aquí su información.</p>
-          <a className="mis-pedidos__comprar" href="/">Explorar catálogo</a>
+          <h2>
+            {seccion === "compras"
+              ? "Aún no tienes compras"
+              : "No tienes pagos pendientes"}
+          </h2>
+          <p>
+            {seccion === "compras"
+              ? "Cuando completes una compra, podrás consultar aquí su información."
+              : "Los pedidos pendientes o rechazados aparecerán aquí."}
+          </p>
+
+          <a className="mis-pedidos__comprar" href="/">
+            Explorar catálogo
+          </a>
         </div>
       ) : null}
 
-      {!cargando && !error && pedidos.length > 0 ? (
+      {!cargando && !error && pedidosVisibles.length > 0 ? (
         <div className="mis-pedidos__lista">
-          {pedidos.map((pedido) => {
+          {pedidosVisibles.map((pedido) => {
             const abierto = !!abiertos[pedido.id];
             return (
               <article className="mis-pedidos__tarjeta" key={pedido.id}>
                 <div className="mis-pedidos__fila">
                   <div>
                     <p className="mis-pedidos__numero">Pedido #{pedido.id}</p>
-                    <p className="mis-pedidos__fecha">{fechaLegible(pedido.fecha)}</p>
+                    <p className="mis-pedidos__fecha">
+                      {fechaLegible(pedido.fecha)}
+                    </p>
                   </div>
-                  <div className="mis-pedidos__importe">{moneda(pedido.total)}</div>
+                  <div className="mis-pedidos__importe">
+                    {moneda(pedido.total)}
+                  </div>
                 </div>
                 <div className="mis-pedidos__estados">
-                  <div><span>Pedido</span><Estado estado={pedido.estatus} tipo="pedido" /></div>
-                  <div><span>Pago</span><Estado estado={pedido.estadoPago} tipo="pago" /></div>
+                  <div>
+                    <span>Pedido</span>
+                    <Estado estado={pedido.estatus} tipo="pedido" />
+                  </div>
+                  <div>
+                    <span>Pago</span>
+                    <Estado estado={pedido.estadoPago} tipo="pago" />
+                  </div>
                 </div>
                 {puedeContinuarPago(pedido) && (
                   <div className="mis-pedidos__accion">
@@ -171,38 +313,72 @@ export default function MisPedidos() {
                     </a>
                     {pedido.estadoPago && (
                       <small>
-                        El intento anterior no se completó. Puedes pagar con
-                        la misma u otra tarjeta.
+                        El intento anterior no se completó. Puedes pagar con la
+                        misma u otra tarjeta.
                       </small>
                     )}
                   </div>
                 )}
+
+                {seccion === "pendientes" && puedeContinuarPago(pedido) && (
+                  <div className="mis-pedidos__cancelar-contenedor">
+                    <button
+                      type="button"
+                      className="mis-pedidos__cancelar"
+                      disabled={cancelando !== null}
+                      onClick={() => cancelarPedido(pedido)}
+                    >
+                      {cancelando === pedido.id
+                        ? "Cancelando..."
+                        : "Cancelar pedido"}
+                    </button>
+                  </div>
+                )}
+
                 <button
                   className="mis-pedidos__detalle-btn"
                   type="button"
                   aria-expanded={abierto}
                   aria-controls={`detalle-pedido-${pedido.id}`}
-                  onClick={() => setAbiertos((prev) => ({ ...prev, [pedido.id]: !prev[pedido.id] }))}
+                  onClick={() =>
+                    setAbiertos((prev) => ({
+                      ...prev,
+                      [pedido.id]: !prev[pedido.id],
+                    }))
+                  }
                 >
                   {abierto ? "Ocultar detalles −" : "Ver detalles +"}
                 </button>
                 {abierto && (
-                  <div id={`detalle-pedido-${pedido.id}`} className="mis-pedidos__detalle">
+                  <div
+                    id={`detalle-pedido-${pedido.id}`}
+                    className="mis-pedidos__detalle"
+                  >
                     <h3>Productos</h3>
                     <div className="mis-pedidos__productos">
                       {pedido.detalles.map((item, i) => (
-                        <div className="mis-pedidos__producto" key={`${item.productoId}-${i}`}>
+                        <div
+                          className="mis-pedidos__producto"
+                          key={`${item.productoId}-${i}`}
+                        >
                           <div>
                             <strong>{item.nombreProducto}</strong>
                             {item.variante && <small>{item.variante}</small>}
-                            <small>Cantidad: {item.cantidad} · Precio unitario: {moneda(item.precioUnitario)}</small>
+                            <small>
+                              Cantidad: {item.cantidad} · Precio unitario:{" "}
+                              {moneda(item.precioUnitario)}
+                            </small>
                           </div>
-                          <strong>{moneda(item.cantidad * item.precioUnitario)}</strong>
+                          <strong>
+                            {moneda(item.cantidad * item.precioUnitario)}
+                          </strong>
                         </div>
                       ))}
                     </div>
                     <h3>Dirección de envío</h3>
-                    <p className="mis-pedidos__direccion">{pedido.direccionEnvio || "No registrada"}</p>
+                    <p className="mis-pedidos__direccion">
+                      {pedido.direccionEnvio || "No registrada"}
+                    </p>
                   </div>
                 )}
               </article>
@@ -250,6 +426,64 @@ export default function MisPedidos() {
                 .mis-pedidos__accion{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;padding:0 24px 20px}
         .mis-pedidos__pagar{display:inline-block;padding:10px 18px;background:var(--color-purple,#8f1268);border-radius:8px;color:#fff;text-decoration:none;font-weight:700}
         .mis-pedidos__accion small{color:#796b79}
+        
+.mis-pedidos__pestanas {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+  border-bottom: 1px solid #eadce4;
+  padding-bottom: 12px;
+}
+
+.mis-pedidos__pestanas button {
+  border: 1px solid #eadce4;
+  border-radius: 9px;
+  background: white;
+  padding: 11px 18px;
+  color: #705c6e;
+  font-weight: 700;
+  transition: 0.2s;
+}
+
+.mis-pedidos__pestanas button.activa {
+  background: var(--color-purple, #8f1268);
+  color: white;
+  border-color: var(--color-purple, #8f1268);
+}
+
+.mis-pedidos__cancelar-contenedor {
+  padding: 0 24px 20px;
+}
+
+.mis-pedidos__cancelar {
+  background: white;
+  border: 1px solid #c0394c;
+  border-radius: 8px;
+  padding: 10px 18px;
+  color: #c0394c;
+  font-weight: 700;
+  transition: 0.2s;
+}
+
+.mis-pedidos__cancelar:hover {
+  background: #fff0f2;
+}
+
+.mis-pedidos__cancelar:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.mis-pedidos__error-cancelacion {
+  background: #fff0f2;
+  border: 1px solid #c0394c;
+  border-radius: 9px;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  color: #a02635;
+}
+
       `}</style>
     </section>
   );

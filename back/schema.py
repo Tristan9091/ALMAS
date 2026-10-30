@@ -364,37 +364,112 @@ class ResultadoPagoType:
     total: float
 
 
+
 MENSAJES_RECHAZO = {
-    "card_insufficient_amount": "La tarjeta no tiene fondos suficientes.",
-    "insufficient_amount": "La tarjeta no tiene fondos suficientes.",
-    "bad_filled_card_data": "Revisa los datos de la tarjeta.",
-    "bad_filled_security_code": "El código de seguridad no es correcto.",
-    "bad_filled_date": "La fecha de vencimiento no es correcta.",
-    "invalid_card_token": "Los datos de la tarjeta vencieron. Vuelve a escribirlos.",
-    "rejected_by_issuer": "Tu banco rechazó el pago. Prueba con otra tarjeta.",
-    "required_call_for_authorize": "Tu banco pide que autorices el pago por teléfono.",
-    "card_disabled": "La tarjeta está deshabilitada. Prueba con otra.",
-    "high_risk": "El pago fue rechazado por seguridad. Prueba con otra tarjeta.",
-    "max_attempts_exceeded": "Se superaron los intentos permitidos. Prueba con otra tarjeta.",
-    "amount_limit_exceeded": "El monto supera el límite de la tarjeta.",
-    "invalid_installments": "Esa tarjeta no acepta ese número de meses.",
-    "duplicated_payment": "Ya hiciste un pago igual hace un momento.",
+    # Fondos insuficientes
+    "card_insufficient_amount":
+        "Tu tarjeta no tiene fondos suficientes para realizar la compra.",
+    "insufficient_amount":
+        "Tu tarjeta no tiene fondos suficientes para realizar la compra.",
+    "cc_rejected_insufficient_amount":
+        "Tu tarjeta no tiene fondos suficientes para realizar la compra.",
+
+    # Codigo de seguridad
+    "bad_filled_security_code":
+        "El codigo de seguridad (CVV) es incorrecto. Revisalo e intenta nuevamente.",
+    "cc_rejected_bad_filled_security_code":
+        "El codigo de seguridad (CVV) es incorrecto. Revisalo e intenta nuevamente.",
+
+    # Fecha de vencimiento
+    "bad_filled_date":
+        "La fecha de vencimiento de la tarjeta es incorrecta.",
+    "expired_card":
+        "Tu tarjeta esta vencida. Utiliza otra tarjeta.",
+    "cc_rejected_bad_filled_date":
+        "La fecha de vencimiento de la tarjeta es incorrecta.",
+    "cc_rejected_card_expired":
+        "Tu tarjeta esta vencida. Utiliza otra tarjeta.",
+
+    # Datos de la tarjeta
+    "bad_filled_card_data":
+        "Los datos de la tarjeta son incorrectos. Revisalos e intenta nuevamente.",
+    "invalid_card_token":
+        "Los datos de la tarjeta expiraron. Vuelve a ingresarlos.",
+
+    # Autorizacion bancaria
+    "rejected_by_issuer":
+        "Tu banco rechazo el pago. Contacta a tu banco o utiliza otra tarjeta.",
+    "required_call_for_authorize":
+        "Tu banco necesita autorizar esta compra. Contactalo para continuar.",
+    "cc_rejected_call_for_authorize":
+        "Tu banco necesita autorizar esta compra. Contactalo para continuar.",
+
+    # Tarjeta deshabilitada
+    "card_disabled":
+        "Tu tarjeta esta deshabilitada. Utiliza otra tarjeta.",
+    "cc_rejected_card_disabled":
+        "Tu tarjeta esta deshabilitada. Utiliza otra tarjeta.",
+
+    # Seguridad
+    "high_risk":
+        "El pago fue rechazado por motivos de seguridad. Utiliza otro metodo de pago.",
+    "cc_rejected_high_risk":
+        "El pago fue rechazado por motivos de seguridad.",
+
+    # Limites
+    "amount_limit_exceeded":
+        "El monto de la compra supera el limite permitido por tu tarjeta.",
+    "max_attempts_exceeded":
+        "Superaste el numero de intentos permitidos. Intenta mas tarde.",
+    "invalid_installments":
+        "Tu tarjeta no permite el numero de mensualidades seleccionado.",
+
+    # Pagos duplicados
+    "duplicated_payment":
+        "Se detecto un posible pago duplicado. Revisa tus pedidos antes de continuar.",
+
+    # Otros rechazos
+    "cc_rejected_other_reason":
+        "Tu banco no pudo aprobar el pago. Intenta con otra tarjeta.",
 }
 
 
+
+
 def mensaje_resultado(estado: str, detalle: Optional[str]) -> str:
+
     if estado == "approved":
         return "Tu pago fue aprobado. Ya estamos preparando tus joyas."
+
     if estado in ("in_process", "pending", "authorized", "creado"):
         return (
-            "Tu pago sigue pendiente de confirmación. "
-            "No realices otro intento para este pedido."
+            "Tu pago esta pendiente de confirmacion. "
+            "No realices otro intento hasta conocer el resultado."
         )
+
     if estado in ("refunded", "charged_back"):
-        return "El pago fue devuelto. Contacta a la tienda si tienes dudas."
-    return MENSAJES_RECHAZO.get(
-        detalle or "", "No se pudo completar el pago. Prueba con otra tarjeta."
+        return (
+            "El pago fue devuelto. "
+            "Contacta a la tienda si tienes alguna duda."
+        )
+
+    if estado == "cancelled":
+        return "El pago fue cancelado. Puedes intentar nuevamente."
+
+    if estado == "rejected":
+        codigo = (detalle or "").strip().lower()
+
+        return MENSAJES_RECHAZO.get(
+            codigo,
+            "Tu pago fue rechazado. "
+            "Verifica los datos de tu tarjeta o intenta con otra."
+        )
+
+    return (
+        "No pudimos confirmar el estado de tu pago. "
+        "Consulta tus pedidos antes de volver a intentarlo."
     )
+
 
 
 @strawberry.input
@@ -540,6 +615,59 @@ def _mensaje_pago(resumen: dict) -> str:
 
 @strawberry.type
 class Mutation:
+
+    @strawberry.mutation
+    def cancelar_mi_pedido(self, info: Info, pedido_id: int) -> bool:
+        usuario = obtener_usuario_actual(info)
+
+        with transaccion_pago() as session:
+            pedido = session.get(PedidoDB, pedido_id)
+
+            if pedido is None or pedido.usuario_id != usuario.id:
+                raise ValueError("El pedido no existe o no te pertenece.")
+
+            if pedido.estatus != "pendiente":
+                raise ValueError(
+                    "Solo puedes cancelar pedidos pendientes de pago."
+                )
+
+            pagos = session.exec(
+                select(PagoDB).where(PagoDB.pedido_id == pedido.id)
+            ).all()
+
+            # Ningun pago puede seguir activo, incierto o con
+            # inventario reservado.
+            estados_bloqueantes = {
+                "enviando",
+                "verificacion",
+                "creado",
+                "pending",
+                "in_process",
+                "authorized",
+                "approved",
+            }
+
+            if any(
+                pago.estado in estados_bloqueantes
+                or pago.inventario_aplicado
+                for pago in pagos
+            ):
+                raise ValueError(
+                    "Este pedido tiene un pago en proceso o por verificar. "
+                    "No puedes cancelarlo hasta confirmar su resultado."
+                )
+
+            pedido.estatus = "cancelado"
+            session.add(pedido)
+
+        publicar(
+            "pedido_cancelado",
+            f"Pedido #{pedido_id} cancelado por el cliente",
+            pedido_id,
+        )
+
+        return True
+
     @strawberry.mutation
     def crear_producto(self, info: Info, data: ProductoInput) -> ProductoType:
         requerir_admin(info)
@@ -813,26 +941,53 @@ class Mutation:
                 email_pagador=data.email_pagador,
                 intento_id=intento_id,
             )
+        
         except ErrorMercadoPago as error:
-            print(f"[Mercado Pago] Pedido {pedido_id}, intento {intento_id}: {error}")
+            print(
+                f"[Mercado Pago] Pedido {pedido_id}, "
+                f"intento {intento_id}: {error}"
+            )
+
+            # Si no sabemos si hubo cobro, bloqueamos otro intento.
             if error.resultado_incierto:
                 marcar_pago_incierto(intento_id)
+
                 raise ValueError(
                     "No pudimos confirmar el resultado del pago. "
-                    "No vuelvas a intentar pagar este pedido hasta verificarlo con la tienda."
+                    "No vuelvas a intentar pagar este pedido "
+                    "hasta verificarlo con la tienda."
                 ) from error
-            # Solo liberar si sabemos que no hubo cobro ni orden aceptada.
+
+            # La solicitud no genero una orden aceptada.
+            # Liberamos la reserva antes de responder.
             try:
                 liberar_reserva(intento_id)
             except ValueError:
-                # Un webhook pudo haberse adelantado y actualizado el pago.
                 raise ValueError(
-                    "El resultado del pago cambió mientras se procesaba. "
-                    "Verifica el pedido antes de volver a pagar."
+                    "El resultado del pago cambio mientras se procesaba. "
+                    "Verifica tu pedido antes de volver a pagar."
                 ) from error
-            raise ValueError(
-                "Mercado Pago no pudo procesar la tarjeta. Intenta de nuevo."
-            ) from error
+
+            # Errores de configuracion o autorizacion del comercio.
+            if error.http_status in (401, 403):
+                mensaje = (
+                    "No pudimos procesar el pago por un problema "
+                    "con el servicio de pagos. Intenta mas tarde."
+                )
+            else:
+                mensaje = mensaje_resultado(
+                    "rejected",
+                    error.codigo
+                )
+
+            return ResultadoPagoType(
+                pedido_id=pedido_id,
+                aprobado=False,
+                estatus_pedido="pendiente",
+                estado_pago="rejected",
+                mensaje=mensaje,
+                total=total,
+            )
 
         try:
             resumen = aplicar_orden(orden, pedido_esperado=pedido_id)

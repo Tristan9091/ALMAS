@@ -32,6 +32,24 @@ export default function Checkout() {
   // Evita que el Brick envíe dos pagos antes de actualizar React.
   const cobroEnCurso = useRef(false);
 
+  useEffect(() => {
+    const mensaje = sessionStorage.getItem("almas-error-pago");
+
+    if (mensaje) {
+      setError(mensaje);
+      sessionStorage.removeItem("almas-error-pago");
+    }
+  }, []);
+
+  useEffect(() => {
+    const mensaje = sessionStorage.getItem("almas-error-pago");
+
+    if (mensaje) {
+      setError(mensaje);
+      sessionStorage.removeItem("almas-error-pago");
+    }
+  }, []);
+
   const totalCarrito = cart.reduce(
     (sum, item) => sum + item.precio * item.cantidad,
     0,
@@ -42,7 +60,9 @@ export default function Checkout() {
     const PAGOS_REANUDABLES = [null, "rejected", "cancelled"];
 
     const reanudarPedido = async () => {
-      const id = Number(new URLSearchParams(window.location.search).get("pedido"));
+      const id = Number(
+        new URLSearchParams(window.location.search).get("pedido"),
+      );
       if (!id) return;
 
       try {
@@ -153,10 +173,15 @@ export default function Checkout() {
 
         // Solo se puede repetir el cobro si existe un rechazo explícito
         // y el pedido no quedó marcado con una incidencia.
+
         if (rechazado && !incidencia && !r.aprobado) {
-          setError(
-            r.mensaje || "El pago fue rechazado. Prueba con otra tarjeta.",
-          );
+          const mensaje =
+            r.mensaje || "Tu pago fue rechazado. Intenta con otra tarjeta.";
+
+          sessionStorage.setItem("almas-error-pago", mensaje);
+
+          // Reiniciar el formulario de Mercado Pago sin crear otro pedido.
+          window.location.replace(`/checkout?pedido=${pedido.id}`);
           return;
         }
 
@@ -223,7 +248,7 @@ export default function Checkout() {
     );
   }
 
-    if (errorReanudar) {
+  if (errorReanudar) {
     return (
       <div>
         <p className="error">{errorReanudar}</p>
@@ -233,7 +258,6 @@ export default function Checkout() {
   }
 
   if (cart.length === 0 && !pedido) {
-
     return (
       <div>
         <p>Tu carrito está vacío.</p>
@@ -305,7 +329,7 @@ export default function Checkout() {
       <aside className="order-summary">
         <h2>Resumen</h2>
 
-                {(detallesPedido
+        {(detallesPedido
           ? detallesPedido.map((d, i) => ({
               cartKey: `p-${i}`,
               nombre: d.nombreProducto,
