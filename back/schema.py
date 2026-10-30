@@ -953,7 +953,7 @@ class Mutation:
                 marcar_pago_incierto(intento_id)
 
                 raise ValueError(
-                    "No pudimos confirmar el resultado del pago. "
+                    "PAGO_INCIERTO: No pudimos confirmar el resultado del pago. "
                     "No vuelvas a intentar pagar este pedido "
                     "hasta verificarlo con la tienda."
                 ) from error
