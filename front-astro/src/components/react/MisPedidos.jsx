@@ -335,6 +335,18 @@ export default function MisPedidos() {
                   </div>
                 )}
 
+                {seccion === "pendientes" &&
+                  !puedeContinuarPago(pedido) &&
+                  pedido.estatus === "pendiente" && (
+                    <div className="mis-pedidos__accion">
+                      <small>
+                        {pedido.estadoPago === "creado"
+                          ? "Este intento de pago quedó sin completar. Su estado debe verificarse antes de reintentar o cancelar."
+                          : "Tu pago está en proceso o requiere verificación. Por seguridad, todavía no puedes reintentar ni cancelar."}
+                      </small>
+                    </div>
+                  )}
+
                 <button
                   className="mis-pedidos__detalle-btn"
                   type="button"
