@@ -24,17 +24,26 @@ TIMEOUT_SEGUNDOS = 20
 TIPOS_TARJETA = {"credit_card", "debit_card"}
 
 
-class ErrorMercadoPago(Exception):
-    """Error de Mercado Pago, sin exponer datos de la tarjeta.
 
-    resultado_incierto=True significa que la solicitud pudo haberse
-    procesado aunque nuestro servidor no recibiera una respuesta válida.
-    En ese caso NO se debe liberar la reserva ni volver a cobrar.
+class ErrorMercadoPago(Exception):
+    """
+    Error al comunicarse con Mercado Pago.
+
+    resultado_incierto=True indica que no sabemos si hubo cobro.
+    codigo contiene el motivo informado por Mercado Pago, si existe.
     """
 
-    def __init__(self, mensaje: str, resultado_incierto: bool = False):
+    def __init__(
+        self,
+        mensaje: str,
+        resultado_incierto: bool = False,
+        codigo: str | None = None,
+        http_status: int | None = None,
+    ):
         super().__init__(mensaje)
         self.resultado_incierto = resultado_incierto
+        self.codigo = codigo
+        self.http_status = http_status
 
 
 def _access_token() -> str:
@@ -61,6 +70,33 @@ def _mensaje_de_error(respuesta: requests.Response) -> str:
 
     return str(datos.get("message") or datos.get("error") or respuesta.text[:200])
 
+
+def obtener_codigo_error(datos: dict | None) -> str | None:
+    """Extrae el motivo del error de una respuesta de Mercado Pago."""
+
+    if not isinstance(datos, dict):
+        return None
+
+    # Algunas respuestas incluyen el motivo directamente.
+    for campo in ("status_detail", "error_code"):
+        valor = datos.get(campo)
+        if isinstance(valor, str) and valor.strip():
+            return valor.strip()
+
+    # Otras respuestas incluyen una lista de errores.
+    errores = datos.get("errors")
+
+    if isinstance(errores, list):
+        for error in errores:
+            if not isinstance(error, dict):
+                continue
+
+            for campo in ("code", "status_detail"):
+                valor = error.get(campo)
+                if isinstance(valor, str) and valor.strip():
+                    return valor.strip()
+
+    return None
 
 def crear_orden(
     pedido_id: int,
@@ -170,17 +206,31 @@ def crear_orden(
         if isinstance(orden, dict) and orden.get("id"):
             return orden
 
-    # Los errores conocidos de validación/autorización indican que la
-    # solicitud fue rechazada. Los errores de red/servidor, 409, 423 y 429
-    # se tratan como inciertos: nunca es seguro cobrar otra vez a ciegas.
+   
+    # Respuestas sin una orden procesable.
+    # Los errores de red, servidor y estados ambiguos se consideran inciertos.
     resultado_incierto = respuesta.status_code not in {
         400, 401, 402, 403, 404, 422
     }
-    raise ErrorMercadoPago(
-        f"Mercado Pago respondió {respuesta.status_code}: "
-        f"{_mensaje_de_error(respuesta)}",
-        resultado_incierto=resultado_incierto,
+
+    codigo_error = obtener_codigo_error(datos)
+
+    print(
+        f"[Mercado Pago] HTTP {respuesta.status_code}, "
+        f"codigo={codigo_error}, "
+        f"detalle={_mensaje_de_error(respuesta)}"
     )
+
+    raise ErrorMercadoPago(
+        mensaje=(
+            f"Mercado Pago respondió {respuesta.status_code}: "
+            f"{_mensaje_de_error(respuesta)}"
+        ),
+        resultado_incierto=resultado_incierto,
+        codigo=codigo_error,
+        http_status=respuesta.status_code,
+    )
+
 
 
 def obtener_orden(order_id: str) -> dict:
