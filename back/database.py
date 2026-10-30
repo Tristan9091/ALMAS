@@ -8,6 +8,8 @@ from contextlib import contextmanager
 from sqlalchemy import inspect, text
 from sqlmodel import SQLModel, create_engine, Session
 
+from uuid import uuid4
+
 BASE_DIR = Path(__file__).resolve().parent
 
 DB_PATH = Path(
@@ -77,6 +79,63 @@ def _respaldar_base() -> Path | None:
 
     return destino
 
+def migrar_claves_idempotencia():
+    """
+    Agrega una clave unica a cada intento de pago existente.
+    No modifica las claves que ya estan guardadas.
+    """
+    inspector = inspect(engine)
+
+    if "pago" not in inspector.get_table_names():
+        return
+
+    columnas = {
+        columna["name"]
+        for columna in inspector.get_columns("pago")
+    }
+
+    if "clave_idempotencia" not in columnas:
+        _respaldar_base()
+
+        with engine.begin() as conexion:
+            conexion.execute(
+                text("ALTER TABLE pago ADD COLUMN clave_idempotencia VARCHAR")
+            )
+
+        print("[Migracion] Columna clave_idempotencia agregada.")
+
+    with engine.begin() as conexion:
+        pagos = conexion.execute(
+            text(
+                "SELECT id FROM pago "
+                "WHERE clave_idempotencia IS NULL "
+                "OR clave_idempotencia = ''"
+            )
+        ).fetchall()
+
+        for pago in pagos:
+            conexion.execute(
+                text(
+                    "UPDATE pago "
+                    "SET clave_idempotencia = :clave "
+                    "WHERE id = :id"
+                ),
+                {
+                    "clave": str(uuid4()),
+                    "id": pago.id,
+                }
+            )
+
+        conexion.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "ix_pago_clave_idempotencia "
+                "ON pago (clave_idempotencia)"
+            )
+        )
+
+    print("[Migracion] Claves de idempotencia verificadas.")
+
 
 def migrar():
     """
@@ -110,10 +169,9 @@ def migrar():
 
 
 def crear_tablas():
-    # 1. Crea las tablas que no existan (en una base nueva, ya con todas sus columnas).
     SQLModel.metadata.create_all(engine)
-    # 2. Agrega las columnas nuevas a las tablas que ya existían.
     migrar()
+    migrar_claves_idempotencia()
 
 
 def get_session():

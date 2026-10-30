@@ -14,7 +14,15 @@ from sqlmodel import Session, select
 
 from database import transaccion_pago
 from events import publicar
-from models import DetallePedido, Pago, Pedido, Producto, ahora
+from models import (
+    DetallePedido,
+    Pago,
+    Pedido,
+    Producto,
+    NotificacionEmail,
+    ahora,
+)
+from sqlalchemy.exc import IntegrityError
 from payments import ErrorMercadoPago, obtener_orden, validar_firma_webhook
 
 router = APIRouter()
@@ -209,6 +217,33 @@ def _evento_de_pago(pedido_id: int, estatus_pedido: str, estado_pago: str) -> tu
         pedido_id,
     )
 
+def registrar_confirmacion_pendiente(
+    session: Session,
+    pedido: Pedido,
+) -> None:
+    """
+    Registra una confirmacion de compra sin enviar el correo.
+    Debe ejecutarse dentro de la transaccion del pago.
+    """
+
+    existente = session.exec(
+        select(NotificacionEmail).where(
+            NotificacionEmail.pedido_id == pedido.id,
+            NotificacionEmail.tipo == "confirmacion_compra",
+        )
+    ).first()
+
+    if existente is not None:
+        return
+
+    notificacion = NotificacionEmail(
+        pedido_id=pedido.id,
+        tipo="confirmacion_compra",
+        destinatario=pedido.email_comprador,
+        estado="pendiente",
+    )
+
+    session.add(notificacion)
 
 def _aplicar_orden(
     orden: dict,
@@ -393,11 +428,21 @@ def _aplicar_orden(
                 session.add(pedido)
             # Una incidencia abierta no se cierra automáticamente.
 
-        evento = None
-        if pago.estado != estado_previo or pedido.estatus != estatus_previo:
-            evento = _evento_de_pago(pedido.id, pedido.estatus, pago.estado)
-        return _resumen_orden(pedido, pago), evento
+                # Registrar la confirmacion solo cuando el pedido
+        # pasa de un estado no pagado a "pagado".
+        if estatus_previo != "pagado" and pedido.estatus == "pagado":
+            registrar_confirmacion_pendiente(session, pedido)
 
+        evento = None
+
+        if pago.estado != estado_previo or pedido.estatus != estatus_previo:
+            evento = _evento_de_pago(
+                pedido.id,
+                pedido.estatus,
+                pago.estado,
+            )
+
+        return _resumen_orden(pedido, pago), evento
 
 def aplicar_orden(
     orden: dict,

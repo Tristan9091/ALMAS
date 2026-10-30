@@ -1,7 +1,8 @@
 from typing import Optional, List
 from sqlmodel import SQLModel, Field, Relationship
+from sqlalchemy import UniqueConstraint
 from datetime import datetime, timezone
-
+from uuid import uuid4
 
 def ahora() -> datetime:
     """Fecha y hora actual en UTC (sin zona, igual que el resto de la base)."""
@@ -86,6 +87,12 @@ class Usuario(SQLModel, table=True):
 
 
 class Pago(SQLModel, table=True):
+    # Identificador unico del intento de pago.
+    clave_idempotencia: str = Field(
+        default_factory=lambda: str(uuid4()),
+        index=True,
+        unique=True,
+    )
     # intento de cobro
     id: Optional[int] = Field(default=None, primary_key=True)
     pedido_id: int = Field(foreign_key="pedido.id", index=True)
@@ -109,3 +116,40 @@ class Pago(SQLModel, table=True):
     fecha_actualizacion: datetime = Field(default_factory=ahora)
 
     pedido: Optional[Pedido] = Relationship(back_populates="pagos")
+
+
+class NotificacionEmail(SQLModel, table=True):
+    __tablename__ = "notificacion_email"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    pedido_id: int = Field(
+        foreign_key="pedido.id",
+        index=True
+    )
+
+    # Tipo de correo: confirmacion_compra, pedido_enviado, etc.
+    tipo: str = Field(index=True)
+
+    destinatario: str
+
+    # pendiente, enviando, enviado o fallido
+    estado: str = "pendiente"
+
+    # Identificador devuelto por Resend
+    resend_id: Optional[str] = None
+
+    intentos: int = 0
+    ultimo_error: Optional[str] = None
+
+    fecha_creacion: datetime = Field(default_factory=ahora)
+    fecha_actualizacion: datetime = Field(default_factory=ahora)
+
+    # Evita registrar dos notificaciones del mismo tipo para un pedido.
+    __table_args__ = (
+        UniqueConstraint(
+            "pedido_id",
+            "tipo",
+            name="uq_notificacion_pedido_tipo"
+        ),
+    )

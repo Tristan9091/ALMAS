@@ -920,7 +920,9 @@ class Mutation:
             )
             session.add(pago)
             session.flush()
+
             intento_id = pago.id
+            clave_idempotencia = pago.clave_idempotencia
             pedido_id, total = pedido.id, pedido.total
 
         # Ya se confirmó la reserva: avisar de los productos que quedaron bajos.
@@ -932,15 +934,16 @@ class Mutation:
 
         try:
             orden = crear_orden(
-                pedido_id=pedido_id,
-                monto=total,
-                token=token,
-                metodo_pago=data.metodo_pago,
-                tipo_pago=data.tipo_pago,
-                cuotas=data.cuotas,
-                email_pagador=data.email_pagador,
-                intento_id=intento_id,
-            )
+            pedido_id=pedido_id,
+            monto=total,
+            token=token,
+            metodo_pago=data.metodo_pago,
+            tipo_pago=data.tipo_pago,
+            cuotas=data.cuotas,
+            email_pagador=data.email_pagador,
+            intento_id=intento_id,
+            clave_idempotencia=clave_idempotencia,
+        )
         
         except ErrorMercadoPago as error:
             print(
