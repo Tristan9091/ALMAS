@@ -13,13 +13,21 @@ const ACTUALIZAR = `
   }
 `;
 
+const [subiendoImagen, setSubiendoImagen] = useState(false);
+const [errorImagen, setErrorImagen] = useState(null);
+
 /**
  * Ventana para agregar o editar un producto.
  * Si "producto" trae id, edita; si viene vacío, crea uno nuevo.
  * Las reglas (precio > 0, stock >= 0, URL válida...) las vuelve a
  * revisar el backend; aquí solo se avisan antes para ahorrar un viaje.
  */
-export default function FormularioProducto({ producto, categorias, onCancelar, onGuardado }) {
+export default function FormularioProducto({
+  producto,
+  categorias,
+  onCancelar,
+  onGuardado,
+}) {
   const esNuevo = !producto.id;
   const primerCampo = useRef(null);
 
@@ -48,6 +56,79 @@ export default function FormularioProducto({ producto, categorias, onCancelar, o
     if (campo === "imagenUrl") setImagenRota(false);
   };
 
+  const subirImagen = async (e) => {
+    const archivo = e.target.files?.[0];
+    if (!archivo) return;
+
+    setErrorImagen(null);
+
+    const tiposPermitidos = ["image/jpeg", "image/png", "image/webp"];
+
+    if (!tiposPermitidos.includes(archivo.type)) {
+      setErrorImagen("Solo se permiten imagenes JPG, PNG y WebP.");
+      e.target.value = "";
+      return;
+    }
+
+    if (archivo.size > 5 * 1024 * 1024) {
+      setErrorImagen("La imagen no puede superar los 5 MB.");
+      e.target.value = "";
+      return;
+    }
+
+    setSubiendoImagen(true);
+
+    try {
+      // Utilizar el mismo token que las operaciones GraphQL.
+      const token = localStorage.getItem("almas-token");
+
+      if (!token) {
+        throw new Error("No hay una sesion iniciada.");
+      }
+
+      // Obtener la URL del backend a partir de GraphQL.
+      const graphqlUrl =
+        import.meta.env.PUBLIC_GRAPHQL_URL ??
+        "https://almas-1.onrender.com/graphql";
+
+      const apiUrl = graphqlUrl.replace(/\/graphql\/?$/, "");
+
+      const formulario = new FormData();
+      formulario.append("archivo", archivo);
+
+      const respuesta = await fetch(`${apiUrl}/admin/subir-imagen`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formulario,
+      });
+
+      const resultado = await respuesta.json();
+
+      if (!respuesta.ok) {
+        throw new Error(
+          typeof resultado.detail === "string"
+            ? resultado.detail
+            : "No se pudo subir la imagen.",
+        );
+      }
+
+      // Guardar automaticamente la URL devuelta por Cloudinary.
+      setDatos((anterior) => ({
+        ...anterior,
+        imagenUrl: resultado.url,
+      }));
+
+      setImagenRota(false);
+    } catch (error) {
+      setErrorImagen(error.message);
+    } finally {
+      setSubiendoImagen(false);
+      e.target.value = "";
+    }
+  };
+
   const guardar = async (e) => {
     e.preventDefault();
     setGuardando(true);
@@ -65,7 +146,8 @@ export default function FormularioProducto({ producto, categorias, onCancelar, o
     try {
       const resultado = esNuevo
         ? (await graphqlAuthRequest(CREAR, { data })).crearProducto
-        : (await graphqlAuthRequest(ACTUALIZAR, { id: producto.id, data })).actualizarProducto;
+        : (await graphqlAuthRequest(ACTUALIZAR, { id: producto.id, data }))
+            .actualizarProducto;
       onGuardado(resultado, esNuevo);
     } catch (err) {
       setError(err.message);
@@ -76,7 +158,10 @@ export default function FormularioProducto({ producto, categorias, onCancelar, o
   const urlValida = /^https?:\/\/.+/.test(datos.imagenUrl.trim());
 
   return (
-    <div className="modal-fondo" onClick={(e) => e.target === e.currentTarget && onCancelar()}>
+    <div
+      className="modal-fondo"
+      onClick={(e) => e.target === e.currentTarget && onCancelar()}
+    >
       <form
         className="modal"
         onSubmit={guardar}
@@ -85,8 +170,15 @@ export default function FormularioProducto({ producto, categorias, onCancelar, o
         aria-labelledby="titulo-formulario"
       >
         <header className="modal-encabezado">
-          <h2 id="titulo-formulario">{esNuevo ? "Nuevo producto" : "Editar producto"}</h2>
-          <button type="button" className="admin-cerrar" onClick={onCancelar} aria-label="Cerrar">
+          <h2 id="titulo-formulario">
+            {esNuevo ? "Nuevo producto" : "Editar producto"}
+          </h2>
+          <button
+            type="button"
+            className="admin-cerrar"
+            onClick={onCancelar}
+            aria-label="Cerrar"
+          >
             ✕
           </button>
         </header>
@@ -162,6 +254,23 @@ export default function FormularioProducto({ producto, categorias, onCancelar, o
               </label>
 
               <label className="campo">
+                Subir imagen del producto
+                <input
+                  className="admin-input"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={subirImagen}
+                  disabled={subiendoImagen}
+                />
+                {subiendoImagen && (
+                  <small>Subiendo imagen a Cloudinary...</small>
+                )}
+                {errorImagen && (
+                  <small style={{ color: "red" }}>{errorImagen}</small>
+                )}
+              </label>
+
+              <label className="campo">
                 URL de la imagen
                 <input
                   className="admin-input"
@@ -177,10 +286,16 @@ export default function FormularioProducto({ producto, categorias, onCancelar, o
             <div className="vista-previa">
               <p>Vista previa</p>
               {urlValida && !imagenRota ? (
-                <img src={datos.imagenUrl.trim()} alt="" onError={() => setImagenRota(true)} />
+                <img
+                  src={datos.imagenUrl.trim()}
+                  alt=""
+                  onError={() => setImagenRota(true)}
+                />
               ) : (
                 <div className="vista-previa-vacia">
-                  {imagenRota ? "No se pudo cargar la imagen" : "Pega una URL para ver la imagen"}
+                  {imagenRota
+                    ? "No se pudo cargar la imagen"
+                    : "Pega una URL para ver la imagen"}
                 </div>
               )}
             </div>
@@ -190,11 +305,23 @@ export default function FormularioProducto({ producto, categorias, onCancelar, o
         </div>
 
         <footer className="modal-pie">
-          <button type="button" className="admin-boton secundario" onClick={onCancelar}>
+          <button
+            type="button"
+            className="admin-boton secundario"
+            onClick={onCancelar}
+          >
             Cancelar
           </button>
-          <button type="submit" className="admin-boton" disabled={guardando}>
-            {guardando ? "Guardando…" : esNuevo ? "Agregar producto" : "Guardar cambios"}
+          <button
+            type="submit"
+            className="admin-boton"
+            disabled={guardando || subiendoImagen}
+          >
+            {guardando
+              ? "Guardando…"
+              : esNuevo
+                ? "Agregar producto"
+                : "Guardar cambios"}
           </button>
         </footer>
       </form>
