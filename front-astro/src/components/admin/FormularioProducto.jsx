@@ -13,9 +13,6 @@ const ACTUALIZAR = `
   }
 `;
 
-const [subiendoImagen, setSubiendoImagen] = useState(false);
-const [errorImagen, setErrorImagen] = useState(null);
-
 /**
  * Ventana para agregar o editar un producto.
  * Si "producto" trae id, edita; si viene vacío, crea uno nuevo.
@@ -42,6 +39,8 @@ export default function FormularioProducto({
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState(null);
   const [imagenRota, setImagenRota] = useState(false);
+  const [subiendoImagen, setSubiendoImagen] = useState(false);
+  const [errorImagen, setErrorImagen] = useState(null);
 
   // Enfocar el primer campo y cerrar con Escape.
   useEffect(() => {
