@@ -107,6 +107,7 @@ def crear_orden(
     cuotas: int,
     email_pagador: str,
     intento_id: int | None = None,
+    clave_idempotencia: str | None = None,
 ) -> dict:
     """Envía un intento de cobro y devuelve la orden de Mercado Pago.
 
@@ -163,11 +164,12 @@ def crear_orden(
 
     # La idempotencia se asocia al intento guardado en ALMAS.
     # El token solo se usa como respaldo para integraciones anteriores.
-    if intento_id is not None:
-        semilla = f"almas-pago-{pedido_id}-{intento_id}"
-    else:
-        semilla = f"almas-{pedido_id}-{token}"
-    llave = hashlib.sha256(semilla.encode("utf-8")).hexdigest()
+    if not clave_idempotencia:
+        raise ErrorMercadoPago(
+            "El intento de pago no tiene una clave de idempotencia."
+        )
+
+    llave = clave_idempotencia
 
     try:
         respuesta = requests.post(

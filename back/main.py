@@ -1,3 +1,9 @@
+import asyncio
+from contextlib import asynccontextmanager, suppress
+
+from fastapi.concurrency import run_in_threadpool
+from email_worker import procesar_notificaciones
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -18,13 +24,31 @@ from database import engine
 from models import Usuario
 from cloudinary_service import subir_imagen
 
+async def ejecutar_worker_email():
+    while True:
+        try:
+            await run_in_threadpool(procesar_notificaciones)
+        except Exception as error:
+            print(f"[Resend] Error en el procesador: {error}")
+
+        await asyncio.sleep(15)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Crea tablas faltantes y agrega columnas nuevas (con respaldo previo).
+    # Preparar la base de datos y el administrador.
     crear_tablas()
-    # Si existen ADMIN_EMAIL y ADMIN_PASSWORD, asegura esa cuenta de admin.
     asegurar_admin_desde_entorno()
-    yield
+
+    # Iniciar el procesador automatico de correos.
+    tarea_email = asyncio.create_task(ejecutar_worker_email())
+
+    try:
+        yield
+    finally:
+        tarea_email.cancel()
+
+        with suppress(asyncio.CancelledError):
+            await tarea_email
 
 app = FastAPI(lifespan=lifespan)
  
