@@ -148,9 +148,36 @@ export default function DireccionGeoapify({ value, onChange }) {
                 <li key={opcion.place_id || indice}>
                   <button
                     type="button"
+                    className="geoapify-opcion"
                     onClick={() => seleccionarDireccion(opcion)}
                   >
-                    {opcion.formatted}
+                    <span className="geoapify-opcion-icono">⌖</span>
+
+                    <span className="geoapify-opcion-contenido">
+                      <strong>
+                        {[opcion.street, opcion.housenumber]
+                          .filter(Boolean)
+                          .join(" ") ||
+                          opcion.address_line1 ||
+                          opcion.formatted}
+                      </strong>
+
+                      <span className="geoapify-opcion-ubicacion">
+                        {[
+                          opcion.suburb,
+                          opcion.city || opcion.county,
+                          opcion.state,
+                        ]
+                          .filter(Boolean)
+                          .join(", ")}
+                      </span>
+
+                      <small>
+                        {opcion.postcode
+                          ? `C.P. ${opcion.postcode} · México`
+                          : "México"}
+                      </small>
+                    </span>
                   </button>
                 </li>
               ))}
