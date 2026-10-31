@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useCartStore } from "../../store/useCartStore";
 import { graphqlAuthRequest } from "../../graphql/client";
 import FormularioTarjeta from "./FormularioTarjeta";
-
+import DireccionGeoapify from "./DireccionGeoapify";
 import "../../styles/checkout.css";
 
 /**
@@ -344,15 +344,7 @@ export default function Checkout() {
             />
           </label>
 
-          <label>
-            Dirección de envío
-            <textarea
-              value={direccion}
-              onChange={(e) => setDireccion(e.target.value)}
-              required
-            />
-          </label>
-
+          <DireccionGeoapify value={direccion} onChange={setDireccion} />
           {error && <p className="error">{error}</p>}
 
           <button type="submit" disabled={loading}>
