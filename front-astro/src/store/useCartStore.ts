@@ -41,16 +41,21 @@ export const useCartStore = create<CartStore>()(
         set((state) => {
           const cartKey = `${producto.id}-${producto.varianteId ?? "none"}`;
 
+          const cantidadTotal = state.cart
+            .filter((item) => item.id === producto.id)
+            .reduce((total, item) => total + item.cantidad, 0);
+
+          if (cantidadTotal >= producto.stock) {
+            return state;
+          }
+
           const existing = state.cart.find((item) => item.cartKey === cartKey);
 
           if (existing) {
             return {
               cart: state.cart.map((item) =>
                 item.cartKey === cartKey
-                  ? {
-                      ...item,
-                      cantidad: item.cantidad + 1,
-                    }
+                  ? { ...item, cantidad: item.cantidad + 1 }
                   : item,
               ),
             };

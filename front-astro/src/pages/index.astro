@@ -19,6 +19,7 @@ interface Producto {
     nombre: string
     precio: number
     imagenUrl?: string | null
+    descripcion: string
 }
 
 interface HomeData {
@@ -39,6 +40,7 @@ const QUERY_HOME = `
             nombre
             precio
             imagenUrl
+            descripcion
         }
     }
 `
@@ -59,20 +61,40 @@ try {
 }
 
 
-// BÚSQUEDA
-const buscar =
-    Astro.url.searchParams
-        .get('buscar')
-        ?.trim()
-        .toLowerCase() ?? ''
+// BUSQUEDA Y FILTROS
+const parametros = Astro.url.searchParams
 
-const productosFiltrados = buscar
-    ? productos.filter((producto) =>
-        producto.nombre
-            .toLowerCase()
-            .includes(buscar)
-    )
-    : productos
+const buscar = parametros.get('buscar')?.trim().toLowerCase() ?? ''
+
+const precioMinimo = Number(parametros.get('min') ?? 0)
+const precioMaximo = Number(parametros.get('max') ?? 0)
+
+const ordenar = parametros.get('ordenar') ?? ''
+
+const productosFiltrados = productos
+    .filter((producto) => {
+        const coincideBusqueda =
+            !buscar ||
+            producto.nombre.toLowerCase().includes(buscar) ||
+            (producto.descripcion ?? '').toLowerCase().includes(buscar)
+
+        const coincideMinimo =
+            !Number.isFinite(precioMinimo) ||
+            precioMinimo <= 0 ||
+            producto.precio >= precioMinimo
+
+        const coincideMaximo =
+            !Number.isFinite(precioMaximo) ||
+            precioMaximo <= 0 ||
+            producto.precio <= precioMaximo
+
+        return coincideBusqueda && coincideMinimo && coincideMaximo
+    })
+    .sort((a, b) => {
+        if (ordenar === 'precio-asc') return a.precio - b.precio
+        if (ordenar === 'precio-desc') return b.precio - a.precio
+        return 0
+    })
 ---
 
 <Layout title="ALMĀS">
@@ -84,7 +106,6 @@ const productosFiltrados = buscar
         <Sidebar categorias={categorias} />
 
         <main>
-
             <h2>
                 {
                     buscar
@@ -92,21 +113,59 @@ const productosFiltrados = buscar
                     : 'Catálogo'
                 }
             </h2>
+            <form method="GET" action="/" class="filtros-catalogo">
+
+                <input
+                    type="search"
+                    name="buscar"
+                    placeholder="Buscar joyas..."
+                    value={Astro.url.searchParams.get('buscar') ?? ''}
+                />
+
+                <input
+                    type="number"
+                    name="min"
+                    min="0"
+                    step="0.01"
+                    placeholder="Precio mínimo"
+                    value={Astro.url.searchParams.get('min') ?? ''}
+                />
+
+                <input
+                    type="number"
+                    name="max"
+                    min="0"
+                    step="0.01"
+                    placeholder="Precio máximo"
+                    value={Astro.url.searchParams.get('max') ?? ''}
+                />
+
+                <select name="ordenar">
+                    <option value="">Orden predeterminado</option>
+                    <option value="precio-asc" selected={ordenar === 'precio-asc'}>
+                        Menor precio
+                    </option>
+                    <option value="precio-desc" selected={ordenar === 'precio-desc'}>
+                        Mayor precio
+                    </option>
+                </select>
+
+                <button type="submit">Aplicar filtros</button>
+                <a href="/">Limpiar</a>
+
+            </form>
 
             {
                 error ? (
                     <p class="error">
                         {error}
                     </p>
-
                 ) : productosFiltrados.length === 0 ? (
                     <p>
                         No hay productos disponibles.
                     </p>
-
                 ) : (
                     <div class="products">
-
                         {
                             productosFiltrados.map((producto) => (
                                 <ProductCard
@@ -117,11 +176,9 @@ const productosFiltrados = buscar
                                 />
                             ))
                         }
-
                     </div>
                 )
             }
-
         </main>
 
     </div>
@@ -155,4 +212,43 @@ const productosFiltrados = buscar
     .error {
         color: #a00;
     }
+    .filtros-catalogo {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+    margin-bottom: 2rem;
+}
+
+.filtros-catalogo input,
+.filtros-catalogo select {
+    min-width: 130px;
+    flex: 1;
+    padding: 0.75rem;
+    border: 1px solid #d8c9b5;
+    border-radius: 8px;
+    background: white;
+    color: #333;
+}
+
+.filtros-catalogo button {
+    padding: 0.75rem 1.25rem;
+    border: none;
+    border-radius: 8px;
+    background: var(--color-purple);
+    color: white;
+    cursor: pointer;
+}
+
+.filtros-catalogo a {
+    color: var(--color-purple);
+    text-decoration: none;
+}
+
+@media (max-width: 600px) {
+    .filtros-catalogo {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}
 </style>
