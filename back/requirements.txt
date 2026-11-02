@@ -32,3 +32,4 @@ requests==2.34.2
 websockets==17.3
 cloudinary==1.46.3
 resend==2.50.1
+psycopg[binary]

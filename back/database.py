@@ -16,27 +16,38 @@ DB_PATH = Path(
     os.getenv("ALMAS_DB_PATH", str(BASE_DIR / "db.sqlite3"))
 ).expanduser().resolve()
 
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH.as_posix()}")
 
-DATABASE_URL = f"sqlite:///{DB_PATH.as_posix()}"
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace(
+        "postgresql://",
+        "postgresql+psycopg://",
+        1
+    )
+
+ES_SQLITE = DATABASE_URL.startswith("sqlite")
+
+if ES_SQLITE:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 engine = create_engine(
     DATABASE_URL,
     echo=False,
-    connect_args={"timeout": 30},
+    pool_pre_ping=True,
+    connect_args={"timeout": 30} if ES_SQLITE else {},
 )
 
 
 @contextmanager
 def transaccion_pago():
     """
-    Bloquea las escrituras de SQLite mientras se comprueban
-    y actualizan los datos de un pago.
-
-    Funciona entre procesos que compartan el mismo archivo SQLite.
+    Maneja transacciones en SQLite y PostgreSQL.
     """
     with engine.connect() as conexion:
-        conexion.exec_driver_sql("BEGIN IMMEDIATE")
+        if ES_SQLITE:
+            conexion.exec_driver_sql("BEGIN IMMEDIATE")
+        else:
+            conexion.begin()
 
         with Session(bind=conexion) as session:
             try:
@@ -46,8 +57,6 @@ def transaccion_pago():
             except Exception:
                 conexion.rollback()
                 raise
-
-
 
 # Columnas agregadas después de que la base ya tenía datos.
 # SQLite no las agrega solo con create_all, así que se agregan aquí.
@@ -170,8 +179,10 @@ def migrar():
 
 def crear_tablas():
     SQLModel.metadata.create_all(engine)
-    migrar()
-    migrar_claves_idempotencia()
+
+    if ES_SQLITE:
+        migrar()
+        migrar_claves_idempotencia()
 
 
 def get_session():

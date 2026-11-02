@@ -104,12 +104,18 @@ def _devolver_stock(session: Session, pedido_id: int) -> None:
     if not cantidades:
         raise ValueError(f"El pedido {pedido_id} no tiene productos para devolver.")
 
-    for producto_id, cantidad in cantidades.items():
-        producto = session.get(Producto, producto_id)
+    for producto_id, cantidad in sorted(cantidades.items()):
+        producto = session.exec(
+            select(Producto)
+            .where(Producto.id == producto_id)
+            .with_for_update()
+        ).first()
+
         if producto is None:
             raise ValueError(
                 f"No existe el producto {producto_id}; no se puede devolver stock."
             )
+
         producto.stock += cantidad
         session.add(producto)
 
@@ -123,17 +129,42 @@ def liberar_reserva(intento_id: int, revision_admin: bool = False) -> bool:
     inciertos, la verificación humana es imprescindible.
     """
     with transaccion_pago() as session:
-        pago = session.get(Pago, intento_id)
+        # Consultar el intento para identificar su pedido.
+        referencia = session.exec(
+            select(Pago.pedido_id)
+            .where(Pago.id == intento_id)
+        ).first()
+
+        if referencia is None:
+            raise ValueError("Este intento no existe.")
+
+        # Bloquear primero el pedido.
+        pedido = session.exec(
+            select(Pedido)
+            .where(Pedido.id == referencia)
+            .with_for_update()
+        ).first()
+
+        if pedido is None:
+            raise ValueError("El pedido no existe.")
+
+        # Bloquear despues el intento de pago.
+        pago = session.exec(
+            select(Pago)
+            .where(Pago.id == intento_id)
+            .with_for_update()
+        ).first()
+
         estado_permitido = "verificacion" if revision_admin else "enviando"
 
         if (
             pago is None
+            or pago.pedido_id != pedido.id
             or pago.estado != estado_permitido
             or pago.order_id is not None
         ):
             raise ValueError("Este intento no se puede liberar automáticamente.")
 
-        pedido = session.get(Pedido, pago.pedido_id)
         if pedido is None or pedido.estatus != "pendiente":
             raise ValueError("El pedido ya no permite liberar la reserva.")
 
@@ -277,10 +308,15 @@ def _aplicar_orden(
     monto = _monto(orden, estado)
 
     with transaccion_pago() as session:
-        pedido = session.get(Pedido, pedido_id)
+        pedido = session.exec(
+            select(Pedido)
+            .where(Pedido.id == pedido_id)
+            .with_for_update()
+        ).first()
+
         if pedido is None:
             raise ValueError(f"No existe el pedido {pedido_id} de la orden {order_id}.")
-
+        
         # Una orden existente siempre conserva el mismo registro de pago.
         pago = session.exec(select(Pago).where(Pago.order_id == order_id)).first()
 
@@ -383,22 +419,27 @@ def _aplicar_orden(
                 productos = {}
                 disponible = bool(cantidades)
 
-                for producto_id, cantidad in cantidades.items():
-                    producto = session.get(Producto, producto_id)
+                for producto_id, cantidad in sorted(cantidades.items()):
+                    producto = session.exec(
+                        select(Producto)
+                        .where(Producto.id == producto_id)
+                        .with_for_update()
+                    ).first()
+
                     if producto is None or producto.stock < cantidad:
                         disponible = False
                     else:
                         productos[producto_id] = producto
-
-                if not disponible:
-                    pedido.estatus = "incidencia_stock"
-                else:
-                    for producto_id, cantidad in cantidades.items():
-                        producto = productos[producto_id]
-                        producto.stock -= cantidad
-                        session.add(producto)
-                    pago.inventario_aplicado = True
-                    pedido.estatus = "pagado"
+                        
+                    if not disponible:
+                        pedido.estatus = "incidencia_stock"
+                    else:
+                        for producto_id, cantidad in cantidades.items():
+                            producto = productos[producto_id]
+                            producto.stock -= cantidad
+                            session.add(producto)
+                        pago.inventario_aplicado = True
+                        pedido.estatus = "pagado"
 
             session.add(pedido)
             session.add(pago)

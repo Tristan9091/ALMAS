@@ -954,7 +954,11 @@ class Mutation:
         # BEGIN IMMEDIATE impide que dos solicitudes reserven el mismo stock
         # o abran dos cobros sobre el mismo pedido al mismo tiempo.
         with transaccion_pago() as session:
-            pedido = session.get(PedidoDB, data.pedido_id)
+            pedido = session.exec(
+                select(PedidoDB)
+                .where(PedidoDB.id == data.pedido_id)
+                .with_for_update()
+            ).first()
             if pedido is None or pedido.usuario_id != usuario.id:
                 raise ValueError("Pedido no encontrado.")
             if pedido.estatus != "pendiente":
@@ -993,7 +997,12 @@ class Mutation:
                 )
 
             for producto_id, cantidad in cantidades.items():
-                producto = session.get(ProductoDB, producto_id)
+                producto = session.exec(
+                    select(ProductoDB)
+                    .where(ProductoDB.id == producto_id)
+                    .with_for_update()
+                ).first()
+                
                 if producto is None or not producto.activo:
                     raise ValueError(
                         "Uno de los productos del pedido ya no está disponible."
