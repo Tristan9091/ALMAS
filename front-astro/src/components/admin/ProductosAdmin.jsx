@@ -19,10 +19,14 @@ const PRODUCTOS_QUERY = `
       stock
       categoriaId
       activo
+      variantes {
+        id
+        tipo
+        valor
+      }
     }
   }
 `;
-
 const CATEGORIAS_QUERY = `
   query {
     categorias {
@@ -75,7 +79,7 @@ export default function ProductosAdmin() {
 
   // El stock cambia al cobrar o cancelar pedidos y al ajustarlo a mano.
   useRefrescarEnVivo(cargar, ["stock_", "pedido_", "pago_"]);
-  
+
   const nombreCategoria = useMemo(
     () => Object.fromEntries(categorias.map((c) => [c.id, c.nombre])),
     [categorias],
@@ -87,7 +91,8 @@ export default function ProductosAdmin() {
     return productos.filter((p) => {
       if (filtro === "activos" && !p.activo) return false;
       if (filtro === "desactivados" && p.activo) return false;
-      if (filtro === "stock" && !(p.activo && p.stock <= STOCK_BAJO)) return false;
+      if (filtro === "stock" && !(p.activo && p.stock <= STOCK_BAJO))
+        return false;
       return !texto || p.nombre.toLowerCase().includes(texto);
     });
   }, [productos, busqueda, filtro]);
@@ -104,7 +109,9 @@ export default function ProductosAdmin() {
         id: producto.id,
         activo: !producto.activo,
       });
-      setMensaje(`"${producto.nombre}" se ${accion === "desactivar" ? "desactivó" : "activó"}.`);
+      setMensaje(
+        `"${producto.nombre}" se ${accion === "desactivar" ? "desactivó" : "activó"}.`,
+      );
       cargar();
     } catch (err) {
       setMensaje(`No se pudo ${accion}: ${err.message}`);
@@ -113,7 +120,9 @@ export default function ProductosAdmin() {
 
   const alGuardar = (producto, esNuevo) => {
     setEditando(null);
-    setMensaje(`"${producto.nombre}" se ${esNuevo ? "agregó" : "actualizó"} correctamente.`);
+    setMensaje(
+      `"${producto.nombre}" se ${esNuevo ? "agregó" : "actualizó"} correctamente.`,
+    );
     cargar();
   };
 
@@ -124,11 +133,14 @@ export default function ProductosAdmin() {
   const conteo = (f) =>
     productos
       ? productos.filter((p) =>
-        f === "activos" ? p.activo
-          : f === "desactivados" ? !p.activo
-            : f === "stock" ? p.activo && p.stock <= STOCK_BAJO
-              : true,
-      ).length
+          f === "activos"
+            ? p.activo
+            : f === "desactivados"
+              ? !p.activo
+              : f === "stock"
+                ? p.activo && p.stock <= STOCK_BAJO
+                : true,
+        ).length
       : 0;
 
   return (
@@ -146,13 +158,21 @@ export default function ProductosAdmin() {
       {mensaje && (
         <div className="admin-aviso-linea exito" role="status">
           {mensaje}
-          <button className="admin-cerrar" onClick={() => setMensaje(null)} aria-label="Cerrar aviso">
+          <button
+            className="admin-cerrar"
+            onClick={() => setMensaje(null)}
+            aria-label="Cerrar aviso"
+          >
             ✕
           </button>
         </div>
       )}
 
-      {error && <div className="admin-aviso-linea">No se pudieron cargar los productos: {error}</div>}
+      {error && (
+        <div className="admin-aviso-linea">
+          No se pudieron cargar los productos: {error}
+        </div>
+      )}
 
       <div className="admin-filtros">
         <input
@@ -163,7 +183,11 @@ export default function ProductosAdmin() {
           onChange={(e) => setBusqueda(e.target.value)}
           aria-label="Buscar producto"
         />
-        <div className="admin-segmentos" role="group" aria-label="Filtrar productos">
+        <div
+          className="admin-segmentos"
+          role="group"
+          aria-label="Filtrar productos"
+        >
           {[
             ["todos", "Todos"],
             ["activos", "Activos"],
@@ -197,7 +221,9 @@ export default function ProductosAdmin() {
                   <th className="num">Precio</th>
                   <th className="num">Stock</th>
                   <th>Estado</th>
-                  <th><span className="solo-lector">Acciones</span></th>
+                  <th>
+                    <span className="solo-lector">Acciones</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -230,7 +256,10 @@ export default function ProductosAdmin() {
                     </td>
                     <td>
                       <div className="acciones">
-                        <button className="admin-enlace" onClick={() => setEditando(p)}>
+                        <button
+                          className="admin-enlace"
+                          onClick={() => setEditando(p)}
+                        >
                           Editar
                         </button>
                         <button

@@ -27,6 +27,13 @@ export default function FormularioProducto({
 }) {
   const esNuevo = !producto.id;
   const primerCampo = useRef(null);
+  const [variantes, setVariantes] = useState(
+    (producto.variantes ?? []).map((v) => ({
+      id: v.id,
+      tipo: v.tipo,
+      valor: v.valor,
+    })),
+  );
 
   const [datos, setDatos] = useState({
     nombre: producto.nombre ?? "",
@@ -128,6 +135,25 @@ export default function FormularioProducto({
     }
   };
 
+  const agregarVariante = () => {
+    setVariantes((actuales) => [
+      ...actuales,
+      { id: null, tipo: "talla", valor: "" },
+    ]);
+  };
+
+  const cambiarVariante = (indice, campo, valor) => {
+    setVariantes((actuales) =>
+      actuales.map((variante, i) =>
+        i === indice ? { ...variante, [campo]: valor } : variante,
+      ),
+    );
+  };
+
+  const eliminarVariante = (indice) => {
+    setVariantes((actuales) => actuales.filter((_, i) => i !== indice));
+  };
+
   const guardar = async (e) => {
     e.preventDefault();
     setGuardando(true);
@@ -140,6 +166,11 @@ export default function FormularioProducto({
       stock: Number.parseInt(datos.stock, 10),
       categoriaId: Number(datos.categoriaId),
       imagenUrl: datos.imagenUrl,
+      variantes: variantes.map((v) => ({
+        id: v.id ?? null,
+        tipo: v.tipo.trim(),
+        valor: v.valor.trim(),
+      })),
     };
 
     try {
@@ -251,6 +282,67 @@ export default function FormularioProducto({
                   ))}
                 </select>
               </label>
+
+              <div className="campo">
+                <label>Variantes del producto (opcional)</label>
+
+                {variantes.map((variante, indice) => (
+                  <div
+                    key={variante.id ?? `nueva-${indice}`}
+                    style={{
+                      display: "flex",
+                      gap: "0.5rem",
+                      marginTop: "0.5rem",
+                      alignItems: "center",
+                    }}
+                  >
+                    <select
+                      className="admin-input"
+                      value={variante.tipo}
+                      onChange={(e) =>
+                        cambiarVariante(indice, "tipo", e.target.value)
+                      }
+                    >
+                      <option value="talla">Talla</option>
+                      <option value="longitud">Longitud</option>
+                      <option value="grabado">Grabado</option>
+                    </select>
+
+                    <input
+                      className="admin-input"
+                      placeholder={
+                        variante.tipo === "talla"
+                          ? "Ej. 7"
+                          : variante.tipo === "longitud"
+                            ? "Ej. 45 cm"
+                            : "Ej. Personalizado"
+                      }
+                      value={variante.valor}
+                      onChange={(e) =>
+                        cambiarVariante(indice, "valor", e.target.value)
+                      }
+                      required
+                    />
+
+                    <button
+                      type="button"
+                      className="admin-boton secundario"
+                      onClick={() => eliminarVariante(indice)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+
+                <button
+                  type="button"
+                  className="admin-boton secundario"
+                  onClick={agregarVariante}
+                  style={{ marginTop: "0.75rem" }}
+                >
+                  + Agregar variante
+                </button>
+              </div>
 
               <label className="campo">
                 Subir imagen del producto

@@ -310,6 +310,13 @@ class Query:
 
 
 @strawberry.input
+class VarianteInput:
+    id: Optional[int] = None
+    tipo: str = ""
+    valor: str = ""
+
+
+@strawberry.input
 class ProductoInput:
     nombre: str
     descripcion: str
@@ -317,6 +324,7 @@ class ProductoInput:
     imagen_url: str
     stock: int
     categoria_id: int
+    variantes: Optional[List[VarianteInput]] = None
 
 
 @strawberry.input
@@ -577,6 +585,79 @@ def validar_producto(data: ProductoInput, session: Session) -> dict:
         "categoria_id": data.categoria_id,
     }
 
+def guardar_variantes(
+    session: Session,
+    producto_id: int,
+    variantes: List[VarianteInput],
+) -> None:
+    existentes = session.exec(
+        select(VarianteDB).where(VarianteDB.producto_id == producto_id)
+    ).all()
+
+    por_id = {variante.id: variante for variante in existentes}
+    ids_recibidos = set()
+    combinaciones = set()
+
+    for entrada in variantes:
+        tipo = entrada.tipo.strip().lower()
+        valor = entrada.valor.strip()
+
+        if not tipo or not valor:
+            raise ValueError(
+                "Cada variante debe tener un tipo y un valor."
+            )
+
+        combinacion = (tipo, valor.casefold())
+
+        if combinacion in combinaciones:
+            raise ValueError("No se permiten variantes duplicadas.")
+
+        combinaciones.add(combinacion)
+
+        if entrada.id is not None:
+            if entrada.id in ids_recibidos:
+                raise ValueError("Hay identificadores de variantes repetidos.")
+
+            variante = por_id.get(entrada.id)
+
+            if variante is None:
+                raise ValueError(
+                    "La variante no pertenece a este producto."
+                )
+
+            ids_recibidos.add(entrada.id)
+            variante.tipo = tipo
+            variante.valor = valor
+            session.add(variante)
+        else:
+            session.add(
+                VarianteDB(
+                    producto_id=producto_id,
+                    tipo=tipo,
+                    valor=valor,
+                )
+            )
+
+    for variante in existentes:
+        if variante.id in ids_recibidos:
+            continue
+
+        utilizada = session.exec(
+            select(DetallePedidoDB).where(
+                DetallePedidoDB.variante_id == variante.id
+            )
+        ).first()
+
+        if utilizada is not None:
+            raise ValueError(
+                f"No puedes eliminar la variante "
+                f"'{variante.tipo}: {variante.valor}' "
+                "porque ya aparece en un pedido."
+            )
+
+        session.delete(variante)
+
+    session.flush()
 
 def _registrar_orden_no_aplicada(intento_id: int, orden: dict) -> None:
     """Conserva el ID conocido para poder conciliar una respuesta no aplicada.
@@ -671,29 +752,45 @@ class Mutation:
     @strawberry.mutation
     def crear_producto(self, info: Info, data: ProductoInput) -> ProductoType:
         requerir_admin(info)
+
         with transaccion_pago() as session:
             valores = validar_producto(data, session)
+
             nuevo = ProductoDB(**valores)
             session.add(nuevo)
             session.flush()
+
+            if data.variantes is not None:
+                guardar_variantes(session, nuevo.id, data.variantes)
+
             resultado = producto_a_type(nuevo, session)
+
         return resultado
+
 
     @strawberry.mutation
     def actualizar_producto(
         self, info: Info, id: int, data: ProductoInput
     ) -> ProductoType:
         requerir_admin(info)
-        # Usa la misma exclusión de escritura que las reservas de inventario.
+
         with transaccion_pago() as session:
             producto = session.get(ProductoDB, id)
+
             if producto is None:
                 raise ValueError("El producto no existe.")
+
             for campo, valor in validar_producto(data, session).items():
                 setattr(producto, campo, valor)
+
             session.add(producto)
             session.flush()
+
+            if data.variantes is not None:
+                guardar_variantes(session, producto.id, data.variantes)
+
             resultado = producto_a_type(producto, session)
+
         return resultado
 
     @strawberry.mutation
