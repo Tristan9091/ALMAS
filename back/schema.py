@@ -11,6 +11,7 @@ from typing import AsyncGenerator, List, Optional
 import strawberry
 from sqlmodel import Session, select
 from strawberry.types import Info
+from mongodb import obtener_base_mongo
 
 from auth import (
     create_access_token,
@@ -66,24 +67,48 @@ class ProductoType:
     categoria_id: int
     variantes: List[VarianteType]
     activo: bool = True
+    material: Optional[str] = None
+    piedras: List[str] = strawberry.field(default_factory=list)
+    color: Optional[str] = None
 
 
 def producto_a_type(p: ProductoDB, session: Session) -> ProductoType:
     variantes = session.exec(
         select(VarianteDB).where(VarianteDB.producto_id == p.id)
     ).all()
+
+    documento = None
+
+    try:
+        base_mongo = obtener_base_mongo()
+        documento = base_mongo["productos"].find_one({"_id": p.id})
+    except Exception as error:
+        print(f"[MongoDB] Error consultando producto {p.id}: {error}")
+
+    atributos = documento.get("atributos", {}) if documento else {}
+
     return ProductoType(
         id=p.id,
-        nombre=p.nombre,
-        descripcion=p.descripcion,
+        nombre=documento.get("nombre", p.nombre) if documento else p.nombre,
+        descripcion=(
+            documento.get("descripcion", p.descripcion)
+            if documento else p.descripcion
+        ),
         precio=p.precio,
-        imagen_url=p.imagen_url,
+        imagen_url=(
+            documento.get("imagen_url", p.imagen_url)
+            if documento else p.imagen_url
+        ),
         stock=p.stock,
         categoria_id=p.categoria_id,
         variantes=[
-            VarianteType(id=v.id, tipo=v.tipo, valor=v.valor) for v in variantes
+            VarianteType(id=v.id, tipo=v.tipo, valor=v.valor)
+            for v in variantes
         ],
         activo=p.activo,
+        material=atributos.get("material"),
+        piedras=atributos.get("piedras", []),
+        color=atributos.get("color"),
     )
 
 
@@ -1002,7 +1027,7 @@ class Mutation:
                     .where(ProductoDB.id == producto_id)
                     .with_for_update()
                 ).first()
-                
+
                 if producto is None or not producto.activo:
                     raise ValueError(
                         "Uno de los productos del pedido ya no está disponible."
