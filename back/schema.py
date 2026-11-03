@@ -184,6 +184,7 @@ class Query:
         color: Optional[str] = None,
         disponible: Optional[bool] = None,
         orden: Optional[str] = None,
+        buscar: Optional[str] = None,
     ) -> List[ProductoType]:
         if precio_min is not None and precio_min < 0:
             raise ValueError("El precio minimo no puede ser negativo.")
@@ -217,6 +218,15 @@ class Query:
             if categoria_id is not None:
                 consulta = consulta.where(
                     ProductoDB.categoria_id == categoria_id
+                )
+
+            
+            if buscar and buscar.strip():
+                termino = buscar.strip()
+
+                consulta = consulta.where(
+                    ProductoDB.nombre.ilike(f"%{termino}%")
+                    | ProductoDB.descripcion.ilike(f"%{termino}%")
                 )
 
             if precio_min is not None:

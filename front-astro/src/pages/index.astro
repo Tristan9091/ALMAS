@@ -1,3 +1,4 @@
+
 ---
 export const prerender = false
 
@@ -5,6 +6,7 @@ import Layout from '../layouts/Layout.astro'
 import Hero from '../components/layout/Hero.astro'
 import Sidebar from '../components/layout/Sidebar.astro'
 import ProductCard from '../components/ProductCard.astro'
+import FiltrosCatalogo from '../components/FiltrosCatalogo.astro'
 
 import { graphqlRequest } from '../graphql/client'
 
@@ -28,14 +30,33 @@ interface HomeData {
 }
 
 const QUERY_HOME = `
-    query {
+    query Catalogo(
+        $buscar: String
+        $precioMin: Float
+        $precioMax: Float
+        $material: String
+        $piedra: String
+        $color: String
+        $disponible: Boolean
+        $orden: String
+    ) {
         categorias {
             id
             nombre
             imagenUrl
         }
 
-        products {
+        products(
+            buscar: $buscar
+            precioMin: $precioMin
+            precioMax: $precioMax
+            material: $material
+            piedra: $piedra
+            color: $color
+            disponible: $disponible
+            orden: $orden
+            limit: 100
+        ) {
             id
             nombre
             precio
@@ -45,56 +66,62 @@ const QUERY_HOME = `
     }
 `
 
+// Obtener los filtros de la URL
+const parametros = Astro.url.searchParams
+
+const texto = (nombre: string): string =>
+    parametros.get(nombre)?.trim() || ''
+
+const numero = (nombre: string): number | null => {
+    const valor = texto(nombre)
+
+    if (!valor) return null
+
+    const resultado = Number(valor)
+
+    return Number.isFinite(resultado) && resultado >= 0
+        ? resultado
+        : null
+}
+
+// Filtros seleccionados
+const buscar = texto('buscar')
+const precioMin = numero('precioMin')
+const precioMax = numero('precioMax')
+const material = texto('material')
+const piedra = texto('piedra')
+const color = texto('color')
+const orden = texto('orden')
+const disponible = parametros.get('disponible') === 'true'
+
+// Datos del catalogo
 let categorias: Categoria[] = []
 let productos: Producto[] = []
 let error: string | null = null
 
+// Consultar productos con los filtros aplicados
 try {
-    const data = await graphqlRequest<HomeData>(QUERY_HOME)
+    const data = await graphqlRequest<HomeData>(
+        QUERY_HOME,
+        {
+            buscar: buscar || null,
+            precioMin,
+            precioMax,
+            material: material || null,
+            piedra: piedra || null,
+            color: color || null,
+            disponible: disponible ? true : null,
+            orden: orden || null,
+        }
+    )
 
     categorias = data.categorias
     productos = data.products
 
 } catch (err) {
-    console.error(err)
+    console.error('[Catalogo] Error:', err)
     error = 'No se pudo cargar el catálogo.'
 }
-
-
-// BUSQUEDA Y FILTROS
-const parametros = Astro.url.searchParams
-
-const buscar = parametros.get('buscar')?.trim().toLowerCase() ?? ''
-
-const precioMinimo = Number(parametros.get('min') ?? 0)
-const precioMaximo = Number(parametros.get('max') ?? 0)
-
-const ordenar = parametros.get('ordenar') ?? ''
-
-const productosFiltrados = productos
-    .filter((producto) => {
-        const coincideBusqueda =
-            !buscar ||
-            producto.nombre.toLowerCase().includes(buscar) ||
-            (producto.descripcion ?? '').toLowerCase().includes(buscar)
-
-        const coincideMinimo =
-            !Number.isFinite(precioMinimo) ||
-            precioMinimo <= 0 ||
-            producto.precio >= precioMinimo
-
-        const coincideMaximo =
-            !Number.isFinite(precioMaximo) ||
-            precioMaximo <= 0 ||
-            producto.precio <= precioMaximo
-
-        return coincideBusqueda && coincideMinimo && coincideMaximo
-    })
-    .sort((a, b) => {
-        if (ordenar === 'precio-asc') return a.precio - b.precio
-        if (ordenar === 'precio-desc') return b.precio - a.precio
-        return 0
-    })
 ---
 
 <Layout title="ALMĀS">
@@ -106,106 +133,62 @@ const productosFiltrados = productos
         <Sidebar categorias={categorias} />
 
         <main>
+
             <h2>
                 {
                     buscar
-                    ? `Resultados para "${buscar}"`
-                    : 'Catálogo'
+                        ? `Resultados para "${buscar}"`
+                        : 'Catálogo'
                 }
             </h2>
-            <form method="GET" action="/" class="filtros-catalogo">
-                <div class="filtro-campo filtro-busqueda">
-                    <label for="filtro-buscar">Buscar productos</label>
-                    <div class="filtro-control">
-                        <input
-                            id="filtro-buscar"
-                            type="search"
-                            name="buscar"
-                            placeholder="Nombre o descripción..."
-                            value={Astro.url.searchParams.get('buscar') ?? ''}
-                        />
-                    </div>
-                </div>
 
-                <div class="filtro-campo filtro-precio">
-                    <label for="filtro-min">Precio mínimo</label>
-                <div class="filtro-control con-moneda">
-                    <span class="simbolo-moneda">$</span>
-                        <input
-                            id="filtro-min"
-                            type="number"
-                            name="min"
-                            min="0"
-                            step="0.01"
-                            placeholder="Desde"
-                            value={Astro.url.searchParams.get('min') ?? ''}
-                        />
-                    </div>
-                </div>
-
-                <div class="filtro-campo filtro-precio">
-                    <label for="filtro-max">Precio máximo</label>
-                    <div class="filtro-control con-moneda">
-                        <span class="simbolo-moneda">$</span>
-                        <input
-                            id="filtro-max"
-                            type="number"
-                            name="max"
-                            min="0"
-                            step="0.01"
-                            placeholder="Hasta"
-                            value={Astro.url.searchParams.get('max') ?? ''}
-                        />
-                    </div>
-                </div>
-
-                <div class="filtro-campo filtro-orden">
-                    <label for="filtro-ordenar">Ordenar productos</label>
-                    <div class="filtro-control">
-                        <select id="filtro-ordenar" name="ordenar">
-                            <option value="">Predeterminado</option>
-                            <option value="precio-asc" selected={ordenar === 'precio-asc'}>
-                                Menor precio
-                            </option>
-                            <option value="precio-desc" selected={ordenar === 'precio-desc'}>
-                                Mayor precio
-                            </option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="filtro-acciones">
-                    <button type="submit" class="boton-aplicar">
-                        Aplicar filtros
-                    </button>
-                    <a href="/" class="boton-limpiar">Limpiar</a>
-                </div>
-            </form>
+            <!-- Componente compartido de filtros -->
+            <FiltrosCatalogo parametros={parametros} />
 
             {
                 error ? (
+
                     <p class="error">
                         {error}
                     </p>
-                ) : productosFiltrados.length === 0 ? (
-                    <p>
-                        No hay productos disponibles.
-                    </p>
+
+                ) : productos.length === 0 ? (
+
+                    <div class="sin-resultados">
+                        <h3>No se encontraron productos</h3>
+
+                        <p>
+                            Intenta modificar los filtros
+                            o realizar otra búsqueda.
+                        </p>
+
+                        <a href="/">
+                            Ver todos los productos
+                        </a>
+                    </div>
+
                 ) : (
+
                     <div class="products">
+
                         {
-                            productosFiltrados.map((producto) => (
+                            productos.map((producto) => (
+
                                 <ProductCard
                                     id={producto.id}
                                     nombre={producto.nombre}
                                     precio={producto.precio}
                                     imagenUrl={producto.imagenUrl}
                                 />
+
                             ))
                         }
+
                     </div>
+
                 )
             }
+
         </main>
 
     </div>
@@ -219,6 +202,7 @@ const productosFiltrados = productos
 
     main {
         flex: 1;
+        min-width: 0;
         min-height: 80vh;
         padding: 2rem;
     }
@@ -240,180 +224,45 @@ const productosFiltrados = productos
         color: #a00;
     }
 
-/* FILTROS DEL CATALOGO */
-
-.filtros-catalogo {
-    display: flex;
-    align-items: flex-end;
-    flex-wrap: wrap;
-    gap: 1rem;
-    margin: 1.5rem 0 2rem;
-    padding: 1.5rem;
-    background: #fffaf6;
-    border: 1px solid #eadbc8;
-    border-radius: 16px;
-}
-
-.filtro-campo {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    min-width: 0;
-}
-
-.filtro-campo label {
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: var(--color-purple);
-}
-
-.filtro-busqueda {
-    flex: 1.5 1 190px;
-}
-
-.filtro-precio {
-    flex: 1 1 125px;
-}
-
-.filtro-orden {
-    flex: 1.2 1 160px;
-}
-
-.filtro-control {
-    display: flex;
-    align-items: center;
-    height: 44px;
-    background: #ffffff;
-    border: 1px solid #dcc9b4;
-    border-radius: 10px;
-    overflow: hidden;
-    transition: border-color 0.2s, box-shadow 0.2s;
-}
-
-.filtro-control:focus-within {
-    border-color: #94146c;
-    box-shadow: 0 0 0 3px rgba(148, 20, 108, 0.1);
-}
-
-.filtro-control input,
-.filtro-control select {
-    width: 100%;
-    min-width: 0;
-    height: 100%;
-    padding: 0 0.85rem;
-    border: none;
-    outline: none;
-    background: transparent;
-    color: #43223d;
-    font-family: inherit;
-    font-size: 0.9rem;
-}
-
-.filtro-control input::placeholder {
-    color: #9a8b98;
-    opacity: 1;
-}
-
-.filtro-control select {
-    cursor: pointer;
-}
-
-.simbolo-moneda {
-    padding-left: 0.85rem;
-    color: #a47b35;
-    font-weight: 600;
-}
-
-.con-moneda input {
-    padding-left: 0.4rem;
-}
-
-/* Ocultar flechas de los campos numericos */
-
-.filtro-control input[type="number"] {
-    appearance: textfield;
-    -moz-appearance: textfield;
-}
-
-.filtro-control input[type="number"]::-webkit-inner-spin-button,
-.filtro-control input[type="number"]::-webkit-outer-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
-}
-
-/* BOTONES */
-
-.filtro-acciones {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    min-height: 44px;
-}
-
-.boton-aplicar {
-    height: 44px;
-    padding: 0 1.1rem;
-    border: none;
-    border-radius: 10px;
-    background: var(--color-purple);
-    color: #ffffff;
-    font-family: inherit;
-    font-weight: 600;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background 0.2s, transform 0.2s;
-}
-
-.boton-aplicar:hover {
-    background: #741052;
-    transform: translateY(-1px);
-}
-
-.boton-limpiar {
-    color: var(--color-purple);
-    font-size: 0.9rem;
-    font-weight: 600;
-    text-decoration: none;
-}
-
-.boton-limpiar:hover {
-    text-decoration: underline;
-}
-
-/* RESPONSIVE */
-
-@media (max-width: 900px) {
-    .filtros-catalogo {
-        gap: 0.85rem;
+    .sin-resultados {
+        padding: 3rem 1.5rem;
+        text-align: center;
+        background: #fffaf6;
+        border: 1px solid #eadbc8;
+        border-radius: 16px;
     }
 
-    .filtro-busqueda {
-        flex-basis: 100%;
-    }
-}
-
-@media (max-width: 600px) {
-    .filtros-catalogo {
-        padding: 1rem;
-        gap: 0.85rem;
+    .sin-resultados h3 {
+        color: var(--color-purple);
+        margin-top: 0;
     }
 
-    .filtro-busqueda,
-    .filtro-orden {
-        flex-basis: 100%;
+    .sin-resultados p {
+        color: #777;
+        margin-bottom: 1.5rem;
     }
 
-    .filtro-precio {
-        flex: 1 1 calc(50% - 0.5rem);
+    .sin-resultados a {
+        display: inline-block;
+        padding: 0.8rem 1.5rem;
+        background: var(--color-purple);
+        color: white;
+        border-radius: 10px;
+        text-decoration: none;
+        font-weight: 600;
     }
 
-    .filtro-acciones {
-        width: 100%;
-        justify-content: space-between;
+    .sin-resultados a:hover {
+        background: #741052;
     }
 
-    .boton-aplicar {
-        flex: 1;
+    @media (max-width: 600px) {
+        .content {
+            flex-direction: column;
+        }
+
+        main {
+            padding: 1rem;
+        }
     }
-}
 </style>

@@ -5,6 +5,8 @@ export const prerender = false
 import Layout from '../../layouts/Layout.astro'
 import Sidebar from '../../components/layout/Sidebar.astro'
 import ProductCard from '../../components/ProductCard.astro'
+import FiltrosCatalogo from '../../components/FiltrosCatalogo.astro'
+
 import { graphqlRequest } from '../../graphql/client'
 
 interface Categoria {
@@ -18,10 +20,6 @@ interface Producto {
     nombre: string
     precio: number
     imagenUrl?: string | null
-    material?: string | null
-    color?: string | null
-    piedras: string[]
-    stock: number
 }
 
 interface CatalogoData {
@@ -31,8 +29,9 @@ interface CatalogoData {
 }
 
 const QUERY_CATALOGO = `
-    query Catalogo(
+    query CatalogoCategoria(
         $id: Int!
+        $buscar: String
         $precioMin: Float
         $precioMax: Float
         $material: String
@@ -54,6 +53,7 @@ const QUERY_CATALOGO = `
 
         products(
             categoriaId: $id
+            buscar: $buscar
             precioMin: $precioMin
             precioMax: $precioMax
             material: $material
@@ -67,57 +67,61 @@ const QUERY_CATALOGO = `
             nombre
             precio
             imagenUrl
-            material
-            color
-            piedras
-            stock
         }
     }
 `
 
+// Obtener la categoria seleccionada
 const { id } = Astro.params
 const categoryId = Number(id)
 
-const params = Astro.url.searchParams
+// Obtener los filtros de la URL
+const parametros = Astro.url.searchParams
 
-const texto = (nombre: string) =>
-    params.get(nombre)?.trim() || ''
+const texto = (nombre: string): string =>
+    parametros.get(nombre)?.trim() || ''
 
-const numero = (nombre: string) => {
+const numero = (nombre: string): number | null => {
     const valor = texto(nombre)
+
     if (!valor) return null
 
     const resultado = Number(valor)
+
     return Number.isFinite(resultado) && resultado >= 0
         ? resultado
         : null
 }
 
+// Filtros seleccionados
+const buscar = texto('buscar')
 const precioMin = numero('precioMin')
 const precioMax = numero('precioMax')
 const material = texto('material')
 const piedra = texto('piedra')
 const color = texto('color')
 const orden = texto('orden')
+const disponible = parametros.get('disponible') === 'true'
 
-const soloDisponibles = params.get('disponible') === 'true'
-
+// Datos del catalogo
 let categoria: Categoria | null = null
 let categorias: Categoria[] = []
 let productos: Producto[] = []
 let error: string | null = null
 
+// Consultar los productos de la categoria
 try {
     const data = await graphqlRequest<CatalogoData>(
         QUERY_CATALOGO,
         {
             id: categoryId,
+            buscar: buscar || null,
             precioMin,
             precioMax,
             material: material || null,
             piedra: piedra || null,
             color: color || null,
-            disponible: soloDisponibles ? true : null,
+            disponible: disponible ? true : null,
             orden: orden || null,
         }
     )
@@ -127,180 +131,111 @@ try {
     productos = data.products
 
 } catch (err) {
-    console.error(err)
-    error = 'No se pudo cargar el catálogo.'
+    console.error('[Categoria] Error:', err)
+    error = 'No se pudo cargar la categoría.'
 }
-
-const filtrosActivos = [
-    precioMin !== null,
-    precioMax !== null,
-    material,
-    piedra,
-    color,
-    soloDisponibles,
-    orden,
-].some(Boolean)
 ---
 
 <Layout
-    title={categoria
-        ? `${categoria.nombre} | ALMĀS`
-        : 'Categoría | ALMĀS'}
+    title={
+        categoria
+            ? `${categoria.nombre} | ALMĀS`
+            : 'Categoría | ALMĀS'
+    }
 >
+
     <div class="content">
+
         <Sidebar categorias={categorias} />
 
         <main>
+
             {
                 error ? (
-                    <p class="error">{error}</p>
+
+                    <p class="error">
+                        {error}
+                    </p>
+
                 ) : !categoria ? (
-                    <p>Categoría no encontrada.</p>
+
+                    <div class="sin-resultados">
+                        <h2>Categoría no encontrada</h2>
+
+                        <p>
+                            La categoría que buscas no está disponible.
+                        </p>
+
+                        <a href="/">
+                            Volver al catálogo
+                        </a>
+                    </div>
+
                 ) : (
+
                     <>
                         <h1>{categoria.nombre}</h1>
 
-                        <form method="GET" class="filters">
-                            <div class="filters-heading">
-                                <h2>Filtrar productos</h2>
+                        <!-- Filtros compartidos con el catalogo general -->
+                        <FiltrosCatalogo
+                            categoriaId={categoryId}
+                            parametros={parametros}
+                        />
 
-                                {
-                                    filtrosActivos && (
-                                        <a href={`/categoria/${categoryId}`}>
-                                            Limpiar filtros
-                                        </a>
-                                    )
-                                }
-                            </div>
-
-                            <div class="filters-grid">
-                                <label>
-                                    Precio mínimo
-                                    <input
-                                        type="number"
-                                        name="precioMin"
-                                        min="0"
-                                        step="0.01"
-                                        placeholder="$0"
-                                        value={precioMin ?? ''}
-                                    />
-                                </label>
-
-                                <label>
-                                    Precio máximo
-                                    <input
-                                        type="number"
-                                        name="precioMax"
-                                        min="0"
-                                        step="0.01"
-                                        placeholder="Sin límite"
-                                        value={precioMax ?? ''}
-                                    />
-                                </label>
-
-                                <label>
-                                    Material
-                                    <input
-                                        type="text"
-                                        name="material"
-                                        placeholder="Ej. Oro"
-                                        value={material}
-                                    />
-                                </label>
-
-                                <label>
-                                    Piedra
-                                    <input
-                                        type="text"
-                                        name="piedra"
-                                        placeholder="Ej. Diamante"
-                                        value={piedra}
-                                    />
-                                </label>
-
-                                <label>
-                                    Color
-                                    <input
-                                        type="text"
-                                        name="color"
-                                        placeholder="Ej. Dorado"
-                                        value={color}
-                                    />
-                                </label>
-
-                                <label>
-                                    Ordenar por
-                                    <select name="orden">
-                                        <option value="">Predeterminado</option>
-                                        <option value="precio_asc" selected={orden === 'precio_asc'}>
-                                            Menor precio
-                                        </option>
-                                        <option value="precio_desc" selected={orden === 'precio_desc'}>
-                                            Mayor precio
-                                        </option>
-                                        <option value="nombre_asc" selected={orden === 'nombre_asc'}>
-                                            Nombre A-Z
-                                        </option>
-                                        <option value="nombre_desc" selected={orden === 'nombre_desc'}>
-                                            Nombre Z-A
-                                        </option>
-                                        <option value="recientes" selected={orden === 'recientes'}>
-                                            Más recientes
-                                        </option>
-                                    </select>
-                                </label>
-                            </div>
-
-                            <label class="availability">
-                                <input
-                                    type="checkbox"
-                                    name="disponible"
-                                    value="true"
-                                    checked={soloDisponibles}
-                                />
-                                Solo productos disponibles
-                            </label>
-
-                            <button type="submit">
-                                Aplicar filtros
-                            </button>
-                        </form>
-
-                        <p class="results">
-                            {productos.length} productos encontrados
+                        <p class="resultados">
+                            {
+                                productos.length === 1
+                                    ? '1 producto encontrado'
+                                    : `${productos.length} productos encontrados`
+                            }
                         </p>
 
                         {
                             productos.length === 0 ? (
-                                <div class="empty">
+
+                                <div class="sin-resultados">
                                     <h2>Sin resultados</h2>
+
                                     <p>
-                                        No encontramos productos con esos filtros.
+                                        No encontramos productos que coincidan
+                                        con los filtros seleccionados.
                                     </p>
+
                                     <a href={`/categoria/${categoryId}`}>
-                                        Ver todos los productos
+                                        Limpiar filtros
                                     </a>
                                 </div>
+
                             ) : (
+
                                 <div class="products">
+
                                     {
                                         productos.map((producto) => (
+
                                             <ProductCard
                                                 id={producto.id}
                                                 nombre={producto.nombre}
                                                 precio={producto.precio}
                                                 imagenUrl={producto.imagenUrl}
                                             />
+
                                         ))
                                     }
+
                                 </div>
+
                             )
                         }
                     </>
+
                 )
             }
+
         </main>
+
     </div>
+
 </Layout>
 
 <style>
@@ -321,133 +256,62 @@ const filtrosActivos = [
         margin: 0 0 1.5rem;
     }
 
-    .filters {
-        padding: 1.5rem;
+    .resultados {
         margin-bottom: 1.5rem;
-        border: 1px solid rgba(201, 162, 75, 0.3);
-        border-radius: 14px;
-    }
-
-    .filters-heading {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        margin-bottom: 1.25rem;
-    }
-
-    .filters-heading h2 {
-        margin: 0;
-        font-size: 1.2rem;
-        color: var(--color-purple);
-    }
-
-    .filters-heading a,
-    .empty a {
-        color: var(--color-purple);
-        text-decoration: underline;
-    }
-
-    .filters-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 1rem;
-    }
-
-    .filters-grid label {
-        display: flex;
-        flex-direction: column;
-        gap: 0.4rem;
         font-size: 0.9rem;
-        font-weight: 500;
-    }
-
-    .filters-grid input,
-    .filters-grid select {
-        width: 100%;
-        min-width: 0;
-        box-sizing: border-box;
-        padding: 0.75rem;
-        border: 1px solid #d8d3dc;
-        border-radius: 8px;
-        background: transparent;
-        color: inherit;
-        font: inherit;
-    }
-
-    .filters-grid input:focus,
-    .filters-grid select:focus {
-        outline: 2px solid var(--color-purple);
-        outline-offset: 1px;
-    }
-
-    .availability {
-        display: flex;
-        align-items: center;
-        gap: 0.6rem;
-        margin: 1.25rem 0;
-        font-size: 0.9rem;
-    }
-
-    .filters button {
-        padding: 0.8rem 1.5rem;
-        border: none;
-        border-radius: 8px;
-        background: var(--color-purple);
-        color: white;
-        font: inherit;
-        cursor: pointer;
-    }
-
-    .filters button:hover {
-        opacity: 0.9;
-    }
-
-    .results {
-        margin-bottom: 1.5rem;
-        opacity: 0.75;
-        font-size: 0.9rem;
+        color: #777;
     }
 
     .products {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        grid-template-columns:
+            repeat(auto-fill, minmax(200px, 1fr));
         gap: 1.5rem;
     }
 
-    .empty {
-        padding: 3rem 1rem;
+    .sin-resultados {
+        padding: 3rem 1.5rem;
         text-align: center;
-        border: 1px dashed #ccc;
-        border-radius: 12px;
+        background: #fffaf6;
+        border: 1px solid #eadbc8;
+        border-radius: 16px;
+    }
+
+    .sin-resultados h2 {
+        color: var(--color-purple);
+        margin-top: 0;
+    }
+
+    .sin-resultados p {
+        color: #777;
+        margin-bottom: 1.5rem;
+    }
+
+    .sin-resultados a {
+        display: inline-block;
+        padding: 0.8rem 1.5rem;
+        background: var(--color-purple);
+        color: white;
+        border-radius: 10px;
+        text-decoration: none;
+        font-weight: 600;
+    }
+
+    .sin-resultados a:hover {
+        background: #741052;
     }
 
     .error {
         color: #a00;
     }
 
-    @media (max-width: 1000px) {
-        .filters-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-    }
-
     @media (max-width: 600px) {
-        main {
-            padding: 1rem;
-        }
-
         .content {
             flex-direction: column;
         }
 
-        .filters-grid {
-            grid-template-columns: 1fr;
-        }
-
-        .filters-heading {
-            align-items: flex-start;
-            flex-direction: column;
+        main {
+            padding: 1rem;
         }
     }
 </style>

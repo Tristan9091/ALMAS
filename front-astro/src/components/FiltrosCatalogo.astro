@@ -1,0 +1,344 @@
+
+---
+interface Props {
+    categoriaId?: number
+    parametros: URLSearchParams
+}
+
+const { categoriaId, parametros } = Astro.props
+
+const ruta = categoriaId !== undefined
+    ? `/categoria/${categoriaId}`
+    : '/'
+
+const valor = (nombre: string) =>
+    parametros.get(nombre) ?? ''
+
+const orden = valor('orden')
+const disponible = valor('disponible') === 'true'
+---
+
+<form method="GET" action={ruta} class="filtros-catalogo">
+
+    <div class="filtro-campo filtro-busqueda">
+        <label for="filtro-buscar">Buscar productos</label>
+        <div class="filtro-control">
+            <input
+                id="filtro-buscar"
+                type="search"
+                name="buscar"
+                placeholder="Nombre o descripción..."
+                value={valor('buscar')}
+            />
+        </div>
+    </div>
+
+    <div class="filtro-campo filtro-precio">
+        <label for="filtro-min">Precio mínimo</label>
+        <div class="filtro-control con-moneda">
+            <span class="simbolo-moneda">$</span>
+            <input
+                id="filtro-min"
+                type="number"
+                name="precioMin"
+                min="0"
+                step="0.01"
+                placeholder="Desde"
+                value={valor('precioMin')}
+            />
+        </div>
+    </div>
+
+    <div class="filtro-campo filtro-precio">
+        <label for="filtro-max">Precio máximo</label>
+        <div class="filtro-control con-moneda">
+            <span class="simbolo-moneda">$</span>
+            <input
+                id="filtro-max"
+                type="number"
+                name="precioMax"
+                min="0"
+                step="0.01"
+                placeholder="Hasta"
+                value={valor('precioMax')}
+            />
+        </div>
+    </div>
+
+    <div class="filtro-campo filtro-atributo">
+        <label for="filtro-material">Material</label>
+        <div class="filtro-control">
+            <input
+                id="filtro-material"
+                type="text"
+                name="material"
+                placeholder="Ej. Oro"
+                value={valor('material')}
+            />
+        </div>
+    </div>
+
+    <div class="filtro-campo filtro-atributo">
+        <label for="filtro-piedra">Piedra</label>
+        <div class="filtro-control">
+            <input
+                id="filtro-piedra"
+                type="text"
+                name="piedra"
+                placeholder="Ej. Diamante"
+                value={valor('piedra')}
+            />
+        </div>
+    </div>
+
+    <div class="filtro-campo filtro-atributo">
+        <label for="filtro-color">Color</label>
+        <div class="filtro-control">
+            <input
+                id="filtro-color"
+                type="text"
+                name="color"
+                placeholder="Ej. Dorado"
+                value={valor('color')}
+            />
+        </div>
+    </div>
+
+    <div class="filtro-campo filtro-orden">
+        <label for="filtro-orden">Ordenar productos</label>
+        <div class="filtro-control">
+            <select id="filtro-orden" name="orden">
+                <option value="">Predeterminado</option>
+                <option value="precio_asc" selected={orden === 'precio_asc'}>
+                    Menor precio
+                </option>
+                <option value="precio_desc" selected={orden === 'precio_desc'}>
+                    Mayor precio
+                </option>
+                <option value="nombre_asc" selected={orden === 'nombre_asc'}>
+                    Nombre A-Z
+                </option>
+                <option value="nombre_desc" selected={orden === 'nombre_desc'}>
+                    Nombre Z-A
+                </option>
+                <option value="recientes" selected={orden === 'recientes'}>
+                    Más recientes
+                </option>
+            </select>
+        </div>
+    </div>
+
+    <label class="filtro-disponible">
+        <input
+            type="checkbox"
+            name="disponible"
+            value="true"
+            checked={disponible}
+        />
+        Solo disponibles
+    </label>
+
+    <div class="filtro-acciones">
+        <button type="submit" class="boton-aplicar">
+            Aplicar filtros
+        </button>
+
+        <a href={ruta} class="boton-limpiar">
+            Limpiar
+        </a>
+    </div>
+
+</form>
+
+<style>
+    .filtros-catalogo {
+        display: flex;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin: 1.5rem 0 2rem;
+        padding: 1.5rem;
+        background: #fffaf6;
+        border: 1px solid #eadbc8;
+        border-radius: 16px;
+    }
+
+    .filtro-campo {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        min-width: 0;
+    }
+
+    .filtro-campo label {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--color-purple);
+    }
+
+    .filtro-busqueda {
+        flex: 1.5 1 190px;
+    }
+
+    .filtro-precio {
+        flex: 1 1 125px;
+    }
+
+    .filtro-atributo {
+        flex: 1 1 145px;
+    }
+
+    .filtro-orden {
+        flex: 1.2 1 160px;
+    }
+
+    .filtro-control {
+        display: flex;
+        align-items: center;
+        height: 44px;
+        background: #ffffff;
+        border: 1px solid #dcc9b4;
+        border-radius: 10px;
+        overflow: hidden;
+        transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .filtro-control:focus-within {
+        border-color: #94146c;
+        box-shadow: 0 0 0 3px rgba(148, 20, 108, 0.1);
+    }
+
+    .filtro-control input,
+    .filtro-control select {
+        width: 100%;
+        min-width: 0;
+        height: 100%;
+        padding: 0 0.85rem;
+        border: none;
+        outline: none;
+        background: transparent;
+        color: #43223d;
+        font-family: inherit;
+        font-size: 0.9rem;
+    }
+
+    .filtro-control input::placeholder {
+        color: #9a8b98;
+        opacity: 1;
+    }
+
+    .filtro-control select {
+        cursor: pointer;
+    }
+
+    .simbolo-moneda {
+        padding-left: 0.85rem;
+        color: #a47b35;
+        font-weight: 600;
+    }
+
+    .con-moneda input {
+        padding-left: 0.4rem;
+    }
+
+    .filtro-control input[type="number"] {
+        appearance: textfield;
+        -moz-appearance: textfield;
+    }
+
+    .filtro-control input[type="number"]::-webkit-inner-spin-button,
+    .filtro-control input[type="number"]::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+
+    .filtro-disponible {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        min-height: 44px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--color-purple);
+        cursor: pointer;
+    }
+
+    .filtro-disponible input {
+        accent-color: var(--color-purple);
+        width: 17px;
+        height: 17px;
+    }
+
+    .filtro-acciones {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        min-height: 44px;
+    }
+
+    .boton-aplicar {
+        height: 44px;
+        padding: 0 1.1rem;
+        border: none;
+        border-radius: 10px;
+        background: var(--color-purple);
+        color: #ffffff;
+        font-family: inherit;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: background 0.2s, transform 0.2s;
+    }
+
+    .boton-aplicar:hover {
+        background: #741052;
+        transform: translateY(-1px);
+    }
+
+    .boton-limpiar {
+        color: var(--color-purple);
+        font-size: 0.9rem;
+        font-weight: 600;
+        text-decoration: none;
+    }
+
+    .boton-limpiar:hover {
+        text-decoration: underline;
+    }
+
+    @media (max-width: 900px) {
+        .filtros-catalogo {
+            gap: 0.85rem;
+        }
+
+        .filtro-busqueda {
+            flex-basis: 100%;
+        }
+    }
+
+    @media (max-width: 600px) {
+        .filtros-catalogo {
+            padding: 1rem;
+            gap: 0.85rem;
+        }
+
+        .filtro-busqueda,
+        .filtro-orden {
+            flex-basis: 100%;
+        }
+
+        .filtro-precio,
+        .filtro-atributo {
+            flex: 1 1 calc(50% - 0.5rem);
+        }
+
+        .filtro-acciones {
+            width: 100%;
+            justify-content: space-between;
+        }
+
+        .boton-aplicar {
+            flex: 1;
+        }
+    }
+</style>
