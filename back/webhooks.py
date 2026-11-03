@@ -431,15 +431,15 @@ def _aplicar_orden(
                     else:
                         productos[producto_id] = producto
                         
-                    if not disponible:
-                        pedido.estatus = "incidencia_stock"
-                    else:
-                        for producto_id, cantidad in cantidades.items():
-                            producto = productos[producto_id]
-                            producto.stock -= cantidad
-                            session.add(producto)
-                        pago.inventario_aplicado = True
-                        pedido.estatus = "pagado"
+                if not disponible:
+                    pedido.estatus = "incidencia_stock"
+                else:
+                    for producto_id, cantidad in cantidades.items():
+                        producto = productos[producto_id]
+                        producto.stock -= cantidad
+                        session.add(producto)
+                    pago.inventario_aplicado = True
+                    pedido.estatus = "pagado"
 
             session.add(pedido)
             session.add(pago)
