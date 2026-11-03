@@ -35,3 +35,5 @@ resend==2.50.1
 psycopg[binary]
 pymongo[srv]
 certifi
+groq
+mcp>=1.0,<2.0

@@ -13,6 +13,7 @@ from crear_admin import asegurar_admin_desde_entorno
 from database import crear_tablas
 from schema import schema
 from webhooks import router as webhooks_router
+from ai_router import router as ai_router
 
 from fastapi import File, UploadFile, HTTPException, Header
 from sqlmodel import Session
@@ -108,6 +109,8 @@ app.include_router(
 
 # Ruta HTTP normal (no GraphQL) porque Mercado Pago llama directo al servidor.
 app.include_router(webhooks_router)
+# Asistente de compras con GroqCloud y MCP
+app.include_router(ai_router)
 
 @app.post("/admin/subir-imagen")
 async def subir_imagen_producto(
