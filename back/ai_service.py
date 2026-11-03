@@ -1,4 +1,4 @@
-
+import logging
 import asyncio
 import json
 import os
@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parent
-
+logger = logging.getLogger(__name__)
 load_dotenv(BASE_DIR / ".env")
 
 GROQ_MODEL = os.getenv(
@@ -75,6 +75,11 @@ def convertir_resultado(resultado):
             contenido.append(bloque.text)
 
     if resultado.isError:
+        logger.error(
+            "Error devuelto por MCP: %s",
+            "\n".join(contenido) if contenido else "Sin detalles"
+        )
+
         return json.dumps({
             "error": "La herramienta no pudo completar la consulta",
         })
@@ -205,11 +210,15 @@ async def responder_consulta(
                             resultado_texto = convertir_resultado(
                                 resultado
                             )
-
+                            
                         except Exception:
+                            logger.exception(
+                                "Error ejecutando herramienta MCP: %s",
+                                nombre
+                            )
+
                             resultado_texto = json.dumps({
-                                "error": "No fue posible consultar "
-                                         "la herramienta"
+                                "error": "No fue posible consultar la herramienta"
                             })
 
                     mensajes.append({
