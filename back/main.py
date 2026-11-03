@@ -4,8 +4,6 @@ from contextlib import asynccontextmanager, suppress
 from fastapi.concurrency import run_in_threadpool
 from email_worker import procesar_notificaciones
 
-from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.requests import HTTPConnection
@@ -24,6 +22,8 @@ from database import engine
 from models import Usuario
 from cloudinary_service import subir_imagen
 
+from sincronizacion_catalogo import procesar_sincronizaciones_pendientes
+
 async def ejecutar_worker_email():
     while True:
         try:
@@ -33,22 +33,44 @@ async def ejecutar_worker_email():
 
         await asyncio.sleep(15)
 
+
+async def ejecutar_worker_catalogo():
+    while True:
+        try:
+            resultado = await run_in_threadpool(
+                procesar_sincronizaciones_pendientes
+            )
+
+            for error in resultado["errores"]:
+                print(
+                    f"[Catalogo] Error producto "
+                    f"{error['producto_id']}: {error['error']}"
+                )
+        except Exception as error:
+            print(f"[Catalogo] Error del sincronizador: {error}")
+
+        await asyncio.sleep(30)
+
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Preparar la base de datos y el administrador.
     crear_tablas()
-    asegurar_admin_desde_entorno()
 
-    # Iniciar el procesador automatico de correos.
-    tarea_email = asyncio.create_task(ejecutar_worker_email())
+    tarea_correos = asyncio.create_task(ejecutar_worker_email   ())
+    tarea_catalogo = asyncio.create_task(ejecutar_worker_catalogo())
 
     try:
         yield
     finally:
-        tarea_email.cancel()
+        tarea_catalogo.cancel()
+        tarea_correos.cancel()
 
-        with suppress(asyncio.CancelledError):
-            await tarea_email
+        await asyncio.gather(
+            tarea_catalogo,
+            tarea_correos,
+            return_exceptions=True
+        )
 
 app = FastAPI(lifespan=lifespan)
  

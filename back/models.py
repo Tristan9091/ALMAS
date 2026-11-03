@@ -153,3 +153,16 @@ class NotificacionEmail(SQLModel, table=True):
             name="uq_notificacion_pedido_tipo"
         ),
     )
+
+
+
+class SincronizacionProducto(SQLModel, table=True):
+    __tablename__ = "sincronizacion_producto"
+
+    producto_id: int = Field(
+        primary_key=True,
+        foreign_key="producto.id",
+    )
+    pendiente: bool = True
+    version: int = Field(default=1)
+    fecha_actualizacion: datetime = Field(default_factory=ahora)

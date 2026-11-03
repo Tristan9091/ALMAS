@@ -12,6 +12,8 @@ import strawberry
 from sqlmodel import Session, select
 from strawberry.types import Info
 from mongodb import obtener_base_mongo
+from sincronizacion_catalogo import marcar_producto_pendiente
+from models import SincronizacionProducto
 
 from auth import (
     create_access_token,
@@ -72,6 +74,7 @@ class ProductoType:
     color: Optional[str] = None
 
 
+
 def producto_a_type(p: ProductoDB, session: Session) -> ProductoType:
     variantes = session.exec(
         select(VarianteDB).where(VarianteDB.producto_id == p.id)
@@ -85,20 +88,17 @@ def producto_a_type(p: ProductoDB, session: Session) -> ProductoType:
     except Exception as error:
         print(f"[MongoDB] Error consultando producto {p.id}: {error}")
 
+    # PostgreSQL tiene prioridad en los datos principales.
+    # Los atributos descriptivos se obtienen de MongoDB.
     atributos = documento.get("atributos", {}) if documento else {}
+    atributos = atributos if isinstance(atributos, dict) else {}
 
     return ProductoType(
         id=p.id,
-        nombre=documento.get("nombre", p.nombre) if documento else p.nombre,
-        descripcion=(
-            documento.get("descripcion", p.descripcion)
-            if documento else p.descripcion
-        ),
+        nombre=p.nombre,
+        descripcion=p.descripcion,
         precio=p.precio,
-        imagen_url=(
-            documento.get("imagen_url", p.imagen_url)
-            if documento else p.imagen_url
-        ),
+        imagen_url=p.imagen_url,
         stock=p.stock,
         categoria_id=p.categoria_id,
         variantes=[
@@ -107,10 +107,9 @@ def producto_a_type(p: ProductoDB, session: Session) -> ProductoType:
         ],
         activo=p.activo,
         material=atributos.get("material"),
-        piedras=atributos.get("piedras", []),
+        piedras=atributos.get("piedras") or [],
         color=atributos.get("color"),
     )
-
 
 @strawberry.type
 class CategoriaType:
@@ -774,6 +773,7 @@ class Mutation:
 
         return True
 
+    
     @strawberry.mutation
     def crear_producto(self, info: Info, data: ProductoInput) -> ProductoType:
         requerir_admin(info)
@@ -788,11 +788,14 @@ class Mutation:
             if data.variantes is not None:
                 guardar_variantes(session, nuevo.id, data.variantes)
 
+            marcar_producto_pendiente(session, nuevo.id)
+
             resultado = producto_a_type(nuevo, session)
 
         return resultado
 
 
+    
     @strawberry.mutation
     def actualizar_producto(
         self, info: Info, id: int, data: ProductoInput
@@ -800,7 +803,11 @@ class Mutation:
         requerir_admin(info)
 
         with transaccion_pago() as session:
-            producto = session.get(ProductoDB, id)
+            producto = session.exec(
+                select(ProductoDB)
+                .where(ProductoDB.id == id)
+                .with_for_update()
+            ).first()
 
             if producto is None:
                 raise ValueError("El producto no existe.")
@@ -813,6 +820,8 @@ class Mutation:
 
             if data.variantes is not None:
                 guardar_variantes(session, producto.id, data.variantes)
+
+            marcar_producto_pendiente(session, producto.id)
 
             resultado = producto_a_type(producto, session)
 

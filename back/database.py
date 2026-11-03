@@ -177,7 +177,11 @@ def migrar():
             print(f"[Migración] Columna agregada: {tabla}.{columna}")
 
 
+
 def crear_tablas():
+    # Registrar todos los modelos antes de crear las tablas.
+    import models
+
     SQLModel.metadata.create_all(engine)
 
     if ES_SQLITE:
