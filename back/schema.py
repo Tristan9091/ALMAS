@@ -14,6 +14,7 @@ from strawberry.types import Info
 from mongodb import obtener_base_mongo
 from sincronizacion_catalogo import marcar_producto_pendiente
 from models import SincronizacionProducto
+import re
 
 from auth import (
     create_access_token,
@@ -169,22 +170,148 @@ class EstadoPagoType:
 
 @strawberry.type
 class Query:
+    
     @strawberry.field
     def products(
         self,
         categoria_id: Optional[int] = None,
         limit: int = 20,
         offset: int = 0,
+        precio_min: Optional[float] = None,
+        precio_max: Optional[float] = None,
+        material: Optional[str] = None,
+        piedra: Optional[str] = None,
+        color: Optional[str] = None,
+        disponible: Optional[bool] = None,
+        orden: Optional[str] = None,
     ) -> List[ProductoType]:
+        if precio_min is not None and precio_min < 0:
+            raise ValueError("El precio minimo no puede ser negativo.")
+
+        if precio_max is not None and precio_max < 0:
+            raise ValueError("El precio maximo no puede ser negativo.")
+
+        if (
+            precio_min is not None
+            and precio_max is not None
+            and precio_min > precio_max
+        ):
+            raise ValueError("El precio minimo no puede superar al maximo.")
+
+        ordenes = {
+            "precio_asc",
+            "precio_desc",
+            "nombre_asc",
+            "nombre_desc",
+            "recientes",
+        }
+
+        if orden is not None and orden not in ordenes:
+            raise ValueError("Ordenamiento no valido.")
+
         with Session(engine) as session:
             consulta = select(ProductoDB).where(
                 ProductoDB.activo == True  # noqa: E712
             )
+
             if categoria_id is not None:
-                consulta = consulta.where(ProductoDB.categoria_id == categoria_id)
-            consulta = consulta.offset(max(0, offset)).limit(max(0, min(limit, 100)))
+                consulta = consulta.where(
+                    ProductoDB.categoria_id == categoria_id
+                )
+
+            if precio_min is not None:
+                consulta = consulta.where(
+                    ProductoDB.precio >= precio_min
+                )
+
+            if precio_max is not None:
+                consulta = consulta.where(
+                    ProductoDB.precio <= precio_max
+                )
+
+            if disponible is True:
+                consulta = consulta.where(ProductoDB.stock > 0)
+            elif disponible is False:
+                consulta = consulta.where(ProductoDB.stock <= 0)
+
+            if orden == "precio_asc":
+                consulta = consulta.order_by(
+                    ProductoDB.precio.asc(), ProductoDB.id.asc()
+                )
+            elif orden == "precio_desc":
+                consulta = consulta.order_by(
+                    ProductoDB.precio.desc(), ProductoDB.id.asc()
+                )
+            elif orden == "nombre_asc":
+                consulta = consulta.order_by(
+                    ProductoDB.nombre.asc(), ProductoDB.id.asc()
+                )
+            elif orden == "nombre_desc":
+                consulta = consulta.order_by(
+                    ProductoDB.nombre.desc(), ProductoDB.id.asc()
+                )
+            elif orden == "recientes":
+                consulta = consulta.order_by(ProductoDB.id.desc())
+            else:
+                consulta = consulta.order_by(ProductoDB.id.asc())
+
+            usar_mongo = any(
+                valor is not None and valor.strip()
+                for valor in (material, piedra, color)
+            )
+
+            if usar_mongo:
+                try:
+                    coleccion = obtener_base_mongo()["productos"]
+
+                    condiciones = {}
+
+                    if material and material.strip():
+                        condiciones["atributos.material"] = {
+                            "$regex": f"^{re.escape(material.strip())}$",
+                            "$options": "i",
+                        }
+
+                    if piedra and piedra.strip():
+                        condiciones["atributos.piedras"] = {
+                            "$regex": f"^{re.escape(piedra.strip())}$",
+                            "$options": "i",
+                        }
+
+                    if color and color.strip():
+                        condiciones["atributos.color"] = {
+                            "$regex": f"^{re.escape(color.strip())}$",
+                            "$options": "i",
+                        }
+
+                    ids = [
+                        documento["_id"]
+                        for documento in coleccion.find(
+                            condiciones, {"_id": 1}
+                        )
+                    ]
+
+                except Exception as error:
+                    print(f"[Filtros] Error consultando MongoDB: {error}")
+                    raise ValueError(
+                        "No se pudieron consultar los filtros del catalogo."
+                    ) from error
+
+                if not ids:
+                    return []
+
+                consulta = consulta.where(ProductoDB.id.in_(ids))
+
+            consulta = consulta.offset(max(0, offset)).limit(
+                max(0, min(limit, 100))
+            )
+
             productos = session.exec(consulta).all()
-            return [producto_a_type(p, session) for p in productos]
+
+            return [
+                producto_a_type(producto, session)
+                for producto in productos
+            ]
 
     @strawberry.field
     def product(self, id: int) -> Optional[ProductoType]:

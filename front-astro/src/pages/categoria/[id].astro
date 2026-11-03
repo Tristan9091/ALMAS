@@ -1,10 +1,10 @@
+
 ---
 export const prerender = false
 
 import Layout from '../../layouts/Layout.astro'
 import Sidebar from '../../components/layout/Sidebar.astro'
 import ProductCard from '../../components/ProductCard.astro'
-
 import { graphqlRequest } from '../../graphql/client'
 
 interface Categoria {
@@ -18,32 +18,32 @@ interface Producto {
     nombre: string
     precio: number
     imagenUrl?: string | null
+    material?: string | null
+    color?: string | null
+    piedras: string[]
+    stock: number
 }
 
-interface CategoriaDetalle {
-    id: number
-    nombre: string
-    productos: Producto[]
-}
-
-interface CategoriaData {
-    categoria: CategoriaDetalle | null
+interface CatalogoData {
+    categoria: Categoria | null
     categorias: Categoria[]
+    products: Producto[]
 }
 
-const QUERY_CATEGORIA = `
-    query Categoria($id: Int!) {
-
+const QUERY_CATALOGO = `
+    query Catalogo(
+        $id: Int!
+        $precioMin: Float
+        $precioMax: Float
+        $material: String
+        $piedra: String
+        $color: String
+        $disponible: Boolean
+        $orden: String
+    ) {
         categoria(id: $id) {
             id
             nombre
-
-            productos {
-                id
-                nombre
-                precio
-                imagenUrl
-            }
         }
 
         categorias {
@@ -51,110 +51,256 @@ const QUERY_CATEGORIA = `
             nombre
             imagenUrl
         }
+
+        products(
+            categoriaId: $id
+            precioMin: $precioMin
+            precioMax: $precioMax
+            material: $material
+            piedra: $piedra
+            color: $color
+            disponible: $disponible
+            orden: $orden
+            limit: 100
+        ) {
+            id
+            nombre
+            precio
+            imagenUrl
+            material
+            color
+            piedras
+            stock
+        }
     }
 `
 
-
 const { id } = Astro.params
-
 const categoryId = Number(id)
 
-let categoria: CategoriaDetalle | null = null
+const params = Astro.url.searchParams
+
+const texto = (nombre: string) =>
+    params.get(nombre)?.trim() || ''
+
+const numero = (nombre: string) => {
+    const valor = texto(nombre)
+    if (!valor) return null
+
+    const resultado = Number(valor)
+    return Number.isFinite(resultado) && resultado >= 0
+        ? resultado
+        : null
+}
+
+const precioMin = numero('precioMin')
+const precioMax = numero('precioMax')
+const material = texto('material')
+const piedra = texto('piedra')
+const color = texto('color')
+const orden = texto('orden')
+
+const soloDisponibles = params.get('disponible') === 'true'
+
+let categoria: Categoria | null = null
 let categorias: Categoria[] = []
+let productos: Producto[] = []
 let error: string | null = null
 
 try {
-
-    const data = await graphqlRequest<CategoriaData>(
-        QUERY_CATEGORIA,
+    const data = await graphqlRequest<CatalogoData>(
+        QUERY_CATALOGO,
         {
-            id: categoryId
+            id: categoryId,
+            precioMin,
+            precioMax,
+            material: material || null,
+            piedra: piedra || null,
+            color: color || null,
+            disponible: soloDisponibles ? true : null,
+            orden: orden || null,
         }
     )
 
     categoria = data.categoria
     categorias = data.categorias
+    productos = data.products
 
 } catch (err) {
-
     console.error(err)
-    error = 'No se pudo cargar la categoría.'
-
+    error = 'No se pudo cargar el catálogo.'
 }
+
+const filtrosActivos = [
+    precioMin !== null,
+    precioMax !== null,
+    material,
+    piedra,
+    color,
+    soloDisponibles,
+    orden,
+].some(Boolean)
 ---
 
-
 <Layout
-    title={
-        categoria
-            ? `${categoria.nombre} | ALMĀS`
-            : 'Categoría | ALMĀS'
-    }
+    title={categoria
+        ? `${categoria.nombre} | ALMĀS`
+        : 'Categoría | ALMĀS'}
 >
-
     <div class="content">
-
         <Sidebar categorias={categorias} />
 
         <main>
-
             {
                 error ? (
-
-                    <p class="error">
-                        {error}
-                    </p>
-
+                    <p class="error">{error}</p>
                 ) : !categoria ? (
-
-                    <p>
-                        Categoría no encontrada.
-                    </p>
-
+                    <p>Categoría no encontrada.</p>
                 ) : (
-
                     <>
                         <h1>{categoria.nombre}</h1>
 
+                        <form method="GET" class="filters">
+                            <div class="filters-heading">
+                                <h2>Filtrar productos</h2>
+
+                                {
+                                    filtrosActivos && (
+                                        <a href={`/categoria/${categoryId}`}>
+                                            Limpiar filtros
+                                        </a>
+                                    )
+                                }
+                            </div>
+
+                            <div class="filters-grid">
+                                <label>
+                                    Precio mínimo
+                                    <input
+                                        type="number"
+                                        name="precioMin"
+                                        min="0"
+                                        step="0.01"
+                                        placeholder="$0"
+                                        value={precioMin ?? ''}
+                                    />
+                                </label>
+
+                                <label>
+                                    Precio máximo
+                                    <input
+                                        type="number"
+                                        name="precioMax"
+                                        min="0"
+                                        step="0.01"
+                                        placeholder="Sin límite"
+                                        value={precioMax ?? ''}
+                                    />
+                                </label>
+
+                                <label>
+                                    Material
+                                    <input
+                                        type="text"
+                                        name="material"
+                                        placeholder="Ej. Oro"
+                                        value={material}
+                                    />
+                                </label>
+
+                                <label>
+                                    Piedra
+                                    <input
+                                        type="text"
+                                        name="piedra"
+                                        placeholder="Ej. Diamante"
+                                        value={piedra}
+                                    />
+                                </label>
+
+                                <label>
+                                    Color
+                                    <input
+                                        type="text"
+                                        name="color"
+                                        placeholder="Ej. Dorado"
+                                        value={color}
+                                    />
+                                </label>
+
+                                <label>
+                                    Ordenar por
+                                    <select name="orden">
+                                        <option value="">Predeterminado</option>
+                                        <option value="precio_asc" selected={orden === 'precio_asc'}>
+                                            Menor precio
+                                        </option>
+                                        <option value="precio_desc" selected={orden === 'precio_desc'}>
+                                            Mayor precio
+                                        </option>
+                                        <option value="nombre_asc" selected={orden === 'nombre_asc'}>
+                                            Nombre A-Z
+                                        </option>
+                                        <option value="nombre_desc" selected={orden === 'nombre_desc'}>
+                                            Nombre Z-A
+                                        </option>
+                                        <option value="recientes" selected={orden === 'recientes'}>
+                                            Más recientes
+                                        </option>
+                                    </select>
+                                </label>
+                            </div>
+
+                            <label class="availability">
+                                <input
+                                    type="checkbox"
+                                    name="disponible"
+                                    value="true"
+                                    checked={soloDisponibles}
+                                />
+                                Solo productos disponibles
+                            </label>
+
+                            <button type="submit">
+                                Aplicar filtros
+                            </button>
+                        </form>
+
+                        <p class="results">
+                            {productos.length} productos encontrados
+                        </p>
+
                         {
-                            categoria.productos.length === 0 ? (
-
-                                <p>
-                                    No hay productos en esta categoría.
-                                </p>
-
-                            ) : (
-
-                                <div class="products">
-
-                                    {
-                                        categoria.productos.map(
-                                            (producto) => (
-
-                                                <ProductCard
-                                                    id={producto.id}
-                                                    nombre={producto.nombre}
-                                                    precio={producto.precio}
-                                                    imagenUrl={producto.imagenUrl}
-                                                />
-
-                                            )
-                                        )
-                                    }
-
+                            productos.length === 0 ? (
+                                <div class="empty">
+                                    <h2>Sin resultados</h2>
+                                    <p>
+                                        No encontramos productos con esos filtros.
+                                    </p>
+                                    <a href={`/categoria/${categoryId}`}>
+                                        Ver todos los productos
+                                    </a>
                                 </div>
-
+                            ) : (
+                                <div class="products">
+                                    {
+                                        productos.map((producto) => (
+                                            <ProductCard
+                                                id={producto.id}
+                                                nombre={producto.nombre}
+                                                precio={producto.precio}
+                                                imagenUrl={producto.imagenUrl}
+                                            />
+                                        ))
+                                    }
+                                </div>
                             )
                         }
                     </>
-
                 )
             }
-
         </main>
-
     </div>
-
 </Layout>
 
 <style>
@@ -164,6 +310,7 @@ try {
 
     main {
         flex: 1;
+        min-width: 0;
         min-height: 80vh;
         padding: 2rem;
     }
@@ -171,21 +318,136 @@ try {
     h1 {
         font-family: var(--font-heading);
         color: var(--color-purple);
-        margin-top: 0;
+        margin: 0 0 1.5rem;
+    }
+
+    .filters {
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        border: 1px solid rgba(201, 162, 75, 0.3);
+        border-radius: 14px;
+    }
+
+    .filters-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 1.25rem;
+    }
+
+    .filters-heading h2 {
+        margin: 0;
+        font-size: 1.2rem;
+        color: var(--color-purple);
+    }
+
+    .filters-heading a,
+    .empty a {
+        color: var(--color-purple);
+        text-decoration: underline;
+    }
+
+    .filters-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1rem;
+    }
+
+    .filters-grid label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        font-size: 0.9rem;
+        font-weight: 500;
+    }
+
+    .filters-grid input,
+    .filters-grid select {
+        width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+        padding: 0.75rem;
+        border: 1px solid #d8d3dc;
+        border-radius: 8px;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+    }
+
+    .filters-grid input:focus,
+    .filters-grid select:focus {
+        outline: 2px solid var(--color-purple);
+        outline-offset: 1px;
+    }
+
+    .availability {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        margin: 1.25rem 0;
+        font-size: 0.9rem;
+    }
+
+    .filters button {
+        padding: 0.8rem 1.5rem;
+        border: none;
+        border-radius: 8px;
+        background: var(--color-purple);
+        color: white;
+        font: inherit;
+        cursor: pointer;
+    }
+
+    .filters button:hover {
+        opacity: 0.9;
+    }
+
+    .results {
+        margin-bottom: 1.5rem;
+        opacity: 0.75;
+        font-size: 0.9rem;
     }
 
     .products {
         display: grid;
-
-        grid-template-columns:
-            repeat(auto-fill, minmax(200px, 1fr));
-
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
         gap: 1.5rem;
+    }
+
+    .empty {
+        padding: 3rem 1rem;
+        text-align: center;
+        border: 1px dashed #ccc;
+        border-radius: 12px;
     }
 
     .error {
         color: #a00;
     }
+
+    @media (max-width: 1000px) {
+        .filters-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
+    @media (max-width: 600px) {
+        main {
+            padding: 1rem;
+        }
+
+        .content {
+            flex-direction: column;
+        }
+
+        .filters-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .filters-heading {
+            align-items: flex-start;
+            flex-direction: column;
+        }
+    }
 </style>
-
-
