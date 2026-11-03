@@ -112,6 +112,7 @@ async def responder_consulta(
         command=os.getenv("PYTHON_EXECUTABLE") or __import__("sys").executable,
         args=[str(BASE_DIR / "mcp_catalogo.py")],
         cwd=str(BASE_DIR),
+        env=os.environ.copy(),
     )
 
     mensajes = [
