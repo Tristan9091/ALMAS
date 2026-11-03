@@ -8,6 +8,22 @@ from sqlalchemy import or_
 from database import engine
 from models import Producto, Categoria
 
+import os
+import sys
+
+print(
+    "[MCP DEBUG] DATABASE_URL configurada:",
+    bool(os.getenv("DATABASE_URL")),
+    file=sys.stderr,
+    flush=True
+)
+
+print(
+    "[MCP DEBUG] Motor de base de datos:",
+    engine.dialect.name,
+    file=sys.stderr,
+    flush=True
+)
 
 # Servidor MCP de herramientas para el asesor de ALMAS
 mcp = FastMCP("ALMAS Catalogo")
