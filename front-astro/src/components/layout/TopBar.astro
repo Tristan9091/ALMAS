@@ -1,8 +1,10 @@
 ---
-import CartButton from '../react/CartButton.jsx'
-import SearchBar from '../react/SearchBar.jsx'
-import AuthStatus from '../react/AuthStatus.jsx'
+import CartButton from "../react/CartButton.jsx";
+import SearchBar from "../react/SearchBar.jsx";
+import AuthStatus from "../react/AuthStatus.jsx";
+import InstallButton from "../react/InstallButton.jsx";
 ---
+
 <header>
     <a class="logo" href="/">
         ALMĀS
@@ -11,6 +13,7 @@ import AuthStatus from '../react/AuthStatus.jsx'
     <SearchBar client:load />
 
     <div class="header-actions">
+        <InstallButton client:load /> <!-- línea nueva 2 -->
         <AuthStatus client:load />
         <CartButton client:load />
     </div>
@@ -69,8 +72,8 @@ import AuthStatus from '../react/AuthStatus.jsx'
     }
 
     .header-actions {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-}
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
 </style>

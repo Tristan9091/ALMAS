@@ -14,6 +14,7 @@ export default defineConfig({
         short_name: "ALMĀS",
         description: "ALMĀS - Joyería",
         lang: "es",
+        id: "/",   
         start_url: "/",
         scope: "/",
         display: "standalone",

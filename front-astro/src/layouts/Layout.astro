@@ -25,6 +25,17 @@ import { pwaInfo } from "virtual:pwa-info";
         <meta name="description" content="ALMĀS - Joyería" />
 
         <title>{title}</title>
+         <script is:inline>
+            window.addEventListener("beforeinstallprompt", (e) => {
+                e.preventDefault();
+                window.__pwaPrompt = e;
+                window.dispatchEvent(new Event("pwa-prompt-ready"));
+            });
+            window.addEventListener("appinstalled", () => {
+                window.__pwaPrompt = null;
+                window.dispatchEvent(new Event("pwa-installed"));
+            });
+        </script>
     </head>
 
     <body>
