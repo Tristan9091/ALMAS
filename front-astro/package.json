@@ -29,5 +29,8 @@
   },
   "allowScripts": {
     "esbuild": true
+  },
+  "devDependencies": {
+    "@vite-pwa/astro": "^2.0.4"
   }
 }
