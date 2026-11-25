@@ -4,10 +4,9 @@ import "../styles/global.css";
 import TopBar from "../components/layout/TopBar.astro";
 import Footer from "../components/layout/Footer.astro";
 import AsistenteIA from "../components/react/AsistenteIA.jsx";
+import { pwaInfo } from "virtual:pwa-info";
 
 const { title = "ALMĀS" } = Astro.props;
-
-import { pwaInfo } from "virtual:pwa-info";
 ---
 
 <!doctype html>
@@ -15,22 +14,25 @@ import { pwaInfo } from "virtual:pwa-info";
 <html lang="es">
     <head>
         <meta charset="UTF-8" />
-
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="theme-color" content="#8f1268" />
+
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+
         {pwaInfo && <Fragment set:html={pwaInfo.webManifest.linkTag} />}
 
         <meta name="description" content="ALMĀS - Joyería" />
 
         <title>{title}</title>
-         <script is:inline>
+
+        <script is:inline>
             window.addEventListener("beforeinstallprompt", (e) => {
                 e.preventDefault();
                 window.__pwaPrompt = e;
                 window.dispatchEvent(new Event("pwa-prompt-ready"));
             });
+
             window.addEventListener("appinstalled", () => {
                 window.__pwaPrompt = null;
                 window.dispatchEvent(new Event("pwa-installed"));
@@ -46,5 +48,11 @@ import { pwaInfo } from "virtual:pwa-info";
         <Footer />
 
         <AsistenteIA client:load />
+
+        <script>
+            import { registerSW } from "virtual:pwa-register";
+
+            registerSW({ immediate: true });
+        </script>
     </body>
 </html>
