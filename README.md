@@ -26,17 +26,17 @@ ALMAS-unificado/
 1. **Plugin instalado:** `@vite-pwa/astro` (v2) como dependencia de desarrollo.
 2. **`astro.config.mjs`:** se agregó la integración `AstroPWAIntegration` con el manifiesto:
 
-   | Campo | Valor |
-   |---|---|
-   | `name` | ALMĀS Joyería |
-   | `short_name` | ALMĀS |
-   | `id` | `/` |
-   | `start_url` | `/` |
-   | `scope` | `/` |
-   | `display` | `standalone` |
-   | `theme_color` | `#8f1268` (morado de la marca) |
-   | `background_color` | `#ffffff` |
-   | `icons` | 192×192, 512×512 y 512×512 *maskable* |
+   | Campo              | Valor                                 |
+   | ------------------ | ------------------------------------- |
+   | `name`             | ALMĀS Joyería                         |
+   | `short_name`       | ALMĀS                                 |
+   | `id`               | `/`                                   |
+   | `start_url`        | `/`                                   |
+   | `scope`            | `/`                                   |
+   | `display`          | `standalone`                          |
+   | `theme_color`      | `#8f1268` (morado de la marca)        |
+   | `background_color` | `#ffffff`                             |
+   | `icons`            | 192×192, 512×512 y 512×512 _maskable_ |
 
 3. **Iconos** en `front-astro/public/icons/`:
    - `icon-192.png` (192×192)
@@ -49,11 +49,11 @@ ALMAS-unificado/
 
 Tomados de `src/styles/global.css`:
 
-| Uso en la PWA | Token | Valor |
-|---|---|---|
+| Uso en la PWA                 | Token              | Valor     |
+| ----------------------------- | ------------------ | --------- |
 | `theme_color` e icono (fondo) | morado de la marca | `#8f1268` |
-| `background_color` | fondo | `#ffffff` |
-| Logo del icono | dorado | `#c9a24b` |
+| `background_color`            | fondo              | `#ffffff` |
+| Logo del icono                | dorado             | `#c9a24b` |
 
 ## Cómo correr el proyecto
 
@@ -93,8 +93,3 @@ Sin esa variable, el frontend usa el backend publicado en Render.
    propia ventana.
 4. Nota: las versiones recientes de Lighthouse ya no incluyen la categoría PWA; la evidencia de
    instalabilidad se toma del panel Manifest y de la instalación real de la app.
-
-## Evidencias
-
-Las capturas (manifiesto en DevTools, diálogo de instalación, app instalada en ventana propia e icono
-instalado) están en el reporte `P3-2_reporte_<matrícula>.pdf`.

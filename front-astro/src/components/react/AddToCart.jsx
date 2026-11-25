@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useState, useId } from "react";
 import { useCartStore } from "../../store/useCartStore";
 
 export default function AddToCart({ producto }) {
   const addToCart = useCartStore((state) => state.addToCart);
-
   const cart = useCartStore((state) => state.cart);
+
+  const selectorId = useId();
+
+  const [mensaje, setMensaje] = useState("");
 
   const [varianteId, setVarianteId] = useState(
     producto.variantes?.[0]?.id ?? null,
@@ -38,6 +41,10 @@ export default function AddToCart({ producto }) {
         ? `${varianteSeleccionada.tipo}: ${varianteSeleccionada.valor}`
         : null,
     });
+
+    setMensaje(
+      `${producto.nombre} agregado al carrito. Total de unidades de este producto: ${cantidadEnCarrito + 1}.`,
+    );
   };
 
   return (
@@ -48,9 +55,11 @@ export default function AddToCart({ producto }) {
             marginBottom: "1.5rem",
           }}
         >
-          <label>Variante</label>
+          <label htmlFor={selectorId}>Variante</label>
 
           <select
+            id={selectorId}
+            className="control-producto"
             value={varianteId ?? ""}
             onChange={(event) => setVarianteId(Number(event.target.value))}
             style={{
@@ -71,6 +80,7 @@ export default function AddToCart({ producto }) {
 
       <button
         type="button"
+        className="control-producto"
         onClick={handleAdd}
         disabled={stockDisponible <= 0}
         style={{
@@ -84,6 +94,29 @@ export default function AddToCart({ producto }) {
       >
         {stockDisponible <= 0 ? "Sin stock" : "Agregar al carrito"}
       </button>
+
+      <span className="mensaje-accesible" aria-live="polite">
+        {mensaje}
+      </span>
+
+      <style>{`
+        .control-producto:focus-visible {
+          outline: 3px solid #870d67;
+          outline-offset: 4px;
+        }
+
+        .mensaje-accesible {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          margin: -1px;
+          overflow: hidden;
+          clip-path: inset(50%);
+          white-space: nowrap;
+          border: 0;
+        }
+      `}</style>
     </div>
   );
 }
