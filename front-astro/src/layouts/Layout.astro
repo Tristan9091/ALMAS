@@ -4,6 +4,7 @@ import "../styles/global.css";
 import TopBar from "../components/layout/TopBar.astro";
 import Footer from "../components/layout/Footer.astro";
 import AsistenteIA from "../components/react/AsistenteIA.jsx";
+import EstadoConexion from "../components/react/EstadoConexion.jsx";
 import { pwaInfo } from "virtual:pwa-info";
 
 const { title = "ALMĀS" } = Astro.props;
@@ -42,6 +43,8 @@ const { title = "ALMĀS" } = Astro.props;
 
     <body>
         <TopBar />
+
+        <EstadoConexion client:load />
 
         <slot />
 

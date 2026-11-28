@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#8f1268" />
+    <title>Sin conexión | ALMĀS</title>
+
+    <link rel="icon" href="/icons/icon-192.png" />
+
+    <style>
+      :root {
+        --color-bg: #ffffff;
+        --color-purple: #8f1268;
+        --color-text: #3e084e;
+        --color-gold: #c9a24b;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--color-bg);
+        color: var(--color-text);
+        font-family: Arial, sans-serif;
+        padding: 24px;
+      }
+
+      main {
+        max-width: 440px;
+        width: 100%;
+        text-align: center;
+      }
+
+      .logo {
+        width: 100px;
+        height: 100px;
+        border-radius: 20px;
+        margin-bottom: 24px;
+      }
+
+      h1 {
+        color: var(--color-purple);
+        font-size: 28px;
+        margin: 0 0 16px;
+      }
+
+      p {
+        font-size: 16px;
+        line-height: 1.6;
+        margin-bottom: 24px;
+      }
+
+      .acciones {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      button,
+      a {
+        display: block;
+        padding: 14px 20px;
+        border-radius: 8px;
+        font-size: 15px;
+        font-weight: bold;
+        text-decoration: none;
+        cursor: pointer;
+      }
+
+      button {
+        background: var(--color-purple);
+        color: white;
+        border: 1px solid var(--color-purple);
+      }
+
+      a {
+        background: white;
+        color: var(--color-purple);
+        border: 1px solid var(--color-gold);
+      }
+
+      button:focus-visible,
+      a:focus-visible {
+        outline: 3px solid var(--color-gold);
+        outline-offset: 4px;
+      }
+
+      .nota {
+        font-size: 13px;
+        margin-top: 24px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <main>
+      <img class="logo" src="/icons/icon-192.png" alt="ALMĀS Joyería" />
+
+      <h1>Estás sin conexión</h1>
+
+      <p>
+        Esta página todavía no está disponible sin internet. Puedes volver al
+        catálogo y consultar los productos que hayas visitado anteriormente.
+      </p>
+
+      <div class="acciones">
+        <button onclick="window.location.reload()">Reintentar conexión</button>
+
+        <a href="/">Volver al catálogo</a>
+      </div>
+
+      <p class="nota">Necesitas conexión a internet para realizar compras.</p>
+    </main>
+  </body>
+</html>
