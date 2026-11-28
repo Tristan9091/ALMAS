@@ -1,9 +1,12 @@
 import { useState, useId } from "react";
 import { useCartStore } from "../../store/useCartStore";
+import { traducir } from "../../i18n/utils";
 
-export default function AddToCart({ producto }) {
+export default function AddToCart({ producto, idioma = "es" }) {
   const addToCart = useCartStore((state) => state.addToCart);
   const cart = useCartStore((state) => state.cart);
+
+  const t = (es, en) => traducir(idioma, es, en);
 
   const selectorId = useId();
 
@@ -43,31 +46,28 @@ export default function AddToCart({ producto }) {
     });
 
     setMensaje(
-      `${producto.nombre} agregado al carrito. Total de unidades de este producto: ${cantidadEnCarrito + 1}.`,
+      t(
+        `${producto.nombre} agregado al carrito. Total de unidades de este producto: ${cantidadEnCarrito + 1}.`,
+        `${producto.nombre} added to cart. Total units of this product: ${cantidadEnCarrito + 1}.`,
+      ),
     );
   };
 
   return (
-    <div>
+    <div className="acciones-producto">
       {producto.variantes?.length > 0 && (
         <div
           style={{
             marginBottom: "1.5rem",
           }}
         >
-          <label htmlFor={selectorId}>Variante</label>
+          <label htmlFor={selectorId}>{t("Variante", "Variant")}</label>
 
           <select
             id={selectorId}
-            className="control-producto"
+            className="control-producto selector-producto"
             value={varianteId ?? ""}
             onChange={(event) => setVarianteId(Number(event.target.value))}
-            style={{
-              display: "block",
-              marginTop: "0.5rem",
-              padding: "0.7rem",
-              borderRadius: "8px",
-            }}
           >
             {producto.variantes.map((variante) => (
               <option key={variante.id} value={variante.id}>
@@ -80,19 +80,13 @@ export default function AddToCart({ producto }) {
 
       <button
         type="button"
-        className="control-producto"
+        className="control-producto boton-agregar"
         onClick={handleAdd}
         disabled={stockDisponible <= 0}
-        style={{
-          border: "none",
-          borderRadius: "999px",
-          padding: "0.8rem 1.5rem",
-          backgroundColor: stockDisponible <= 0 ? "#999" : "#8f1268",
-          color: "white",
-          cursor: stockDisponible <= 0 ? "not-allowed" : "pointer",
-        }}
       >
-        {stockDisponible <= 0 ? "Sin stock" : "Agregar al carrito"}
+        {stockDisponible <= 0
+          ? t("Sin stock", "Out of stock")
+          : t("Agregar al carrito", "Add to cart")}
       </button>
 
       <span className="mensaje-accesible" aria-live="polite">
@@ -100,6 +94,42 @@ export default function AddToCart({ producto }) {
       </span>
 
       <style>{`
+        .acciones-producto {
+          width: 100%;
+          min-width: 0;
+        }
+
+        .selector-producto {
+          display: block;
+          width: 100%;
+          min-width: 0;
+          min-height: 44px;
+          margin-top: 0.5rem;
+          padding: 0.7rem;
+          border: 1px solid #c9a24b;
+          border-radius: 8px;
+          background-color: white;
+          color: #3e084e;
+          font-size: 1rem;
+        }
+
+        .boton-agregar {
+          width: 100%;
+          min-height: 44px;
+          border: none;
+          border-radius: 999px;
+          padding: 0.8rem 1.5rem;
+          background-color: #8f1268;
+          color: white;
+          cursor: pointer;
+          font-size: 1rem;
+        }
+
+        .boton-agregar:disabled {
+          background-color: #999;
+          cursor: not-allowed;
+        }
+
         .control-producto:focus-visible {
           outline: 3px solid #870d67;
           outline-offset: 4px;
@@ -115,6 +145,16 @@ export default function AddToCart({ producto }) {
           clip-path: inset(50%);
           white-space: nowrap;
           border: 0;
+        }
+
+        @media (min-width: 768px) {
+          .selector-producto {
+            max-width: 320px;
+          }
+
+          .boton-agregar {
+            width: auto;
+          }
         }
       `}</style>
     </div>

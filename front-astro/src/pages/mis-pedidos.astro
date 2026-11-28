@@ -1,10 +1,25 @@
+
 ---
-import Layout from '../layouts/Layout.astro';
-import MisPedidos from '../components/react/MisPedidos.jsx';
+import Layout from "../layouts/Layout.astro";
+import MisPedidos from "../components/react/MisPedidos.jsx";
+
+import {
+    obtenerIdioma,
+    traducir
+} from "../i18n/utils";
+
+const idioma = obtenerIdioma(Astro.url.pathname);
+
+const t = (es: string, en: string) =>
+    traducir(idioma, es, en);
 ---
 
-<Layout title="Mis pedidos | ALMĀS">
-  <main>
-    <MisPedidos client:load />
-  </main>
+<Layout title={t("Mis pedidos | ALMĀS", "My orders | ALMĀS")}>
+
+    <main>
+
+        <MisPedidos client:load idioma={idioma} />
+
+    </main>
+
 </Layout>

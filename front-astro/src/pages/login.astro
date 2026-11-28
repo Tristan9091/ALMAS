@@ -1,22 +1,23 @@
+
 ---
-import Layout from '../layouts/Layout.astro'
-import LoginForm from '../components/react/LoginForm.jsx'
+import Layout from "../layouts/Layout.astro";
+import LoginForm from "../components/react/LoginForm.jsx";
+
+import {
+    obtenerIdioma,
+    traducir
+} from "../i18n/utils";
+
+const idioma = obtenerIdioma(Astro.url.pathname);
+const t = (es: string, en: string) => traducir(idioma, es, en);
 ---
 
-<Layout title="Iniciar sesión | ALMĀS">
+<Layout title={t("Iniciar sesión | ALMĀS", "Sign in | ALMĀS")}>
 
     <main class="auth-page">
 
-        <LoginForm client:load />
+        <LoginForm client:load idioma={idioma} />
 
     </main>
 
 </Layout>
-
-<style>
-    .auth-page {
-        max-width: 450px;
-        margin: 4rem auto;
-        padding: 2rem;
-    }
-</style>

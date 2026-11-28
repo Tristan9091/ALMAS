@@ -1,29 +1,46 @@
+
 ---
-import Layout from '../layouts/Layout.astro'
-import Cart from '../components/react/Cart.jsx'
+import Layout from "../layouts/Layout.astro";
+import Cart from "../components/react/Cart.jsx";
+
+import {
+    obtenerIdioma,
+    traducir
+} from "../i18n/utils";
+
+const idioma = obtenerIdioma(Astro.url.pathname);
+const t = (es: string, en: string) => traducir(idioma, es, en);
 ---
 
-<Layout title="Carrito | ALMĀS">
+<Layout title={t("Carrito | ALMĀS", "Cart | ALMĀS")}>
 
     <main>
-        <h1>Tu carrito</h1>
+        <h1>{t("Tu carrito", "Your cart")}</h1>
 
-        <Cart client:load />
+        <Cart client:load idioma={idioma} />
     </main>
 
 </Layout>
 
 <style>
     main {
+        width: 100%;
         max-width: 1000px;
-        min-height: 80vh;
+        min-height: 80dvh;
 
         margin: 0 auto;
-        padding: 2rem;
+        padding: var(--page-padding);
     }
 
     h1 {
         font-family: var(--font-heading);
         color: var(--color-purple);
+        font-size: 1.6rem;
+    }
+
+    @media (min-width: 768px) {
+        h1 {
+            font-size: 2rem;
+        }
     }
 </style>

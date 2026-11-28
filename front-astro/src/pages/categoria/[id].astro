@@ -1,31 +1,40 @@
 
 ---
-export const prerender = false
+export const prerender = false;
 
-import Layout from '../../layouts/Layout.astro'
-import Sidebar from '../../components/layout/Sidebar.astro'
-import ProductCard from '../../components/ProductCard.astro'
-import FiltrosCatalogo from '../../components/FiltrosCatalogo.astro'
+import Layout from "../../layouts/Layout.astro";
+import Sidebar from "../../components/layout/Sidebar.astro";
+import ProductCard from "../../components/ProductCard.astro";
+import FiltrosCatalogo from "../../components/FiltrosCatalogo.astro";
 
-import { graphqlRequest } from '../../graphql/client'
+import { graphqlRequest } from "../../graphql/client";
+
+import {
+    obtenerIdioma,
+    rutaLocalizada,
+    traducir
+} from "../../i18n/utils";
+
+const idioma = obtenerIdioma(Astro.url.pathname);
+const t = (es: string, en: string) => traducir(idioma, es, en);
 
 interface Categoria {
-    id: number
-    nombre: string
-    imagenUrl?: string | null
+    id: number;
+    nombre: string;
+    imagenUrl?: string | null;
 }
 
 interface Producto {
-    id: number
-    nombre: string
-    precio: number
-    imagenUrl?: string | null
+    id: number;
+    nombre: string;
+    precio: number;
+    imagenUrl?: string | null;
 }
 
 interface CatalogoData {
-    categoria: Categoria | null
-    categorias: Categoria[]
-    products: Producto[]
+    categoria: Categoria | null;
+    categorias: Categoria[];
+    products: Producto[];
 }
 
 const QUERY_CATALOGO = `
@@ -69,47 +78,45 @@ const QUERY_CATALOGO = `
             imagenUrl
         }
     }
-`
+`;
 
-// Obtener la categoria seleccionada
-const { id } = Astro.params
-const categoryId = Number(id)
+// Obtener la categoría seleccionada
+const { id } = Astro.params;
+const categoryId = Number(id);
 
-// Obtener los filtros de la URL
-const parametros = Astro.url.searchParams
+const parametros = Astro.url.searchParams;
 
 const texto = (nombre: string): string =>
-    parametros.get(nombre)?.trim() || ''
+    parametros.get(nombre)?.trim() || "";
 
 const numero = (nombre: string): number | null => {
-    const valor = texto(nombre)
+    const valor = texto(nombre);
 
-    if (!valor) return null
+    if (!valor) return null;
 
-    const resultado = Number(valor)
+    const resultado = Number(valor);
 
     return Number.isFinite(resultado) && resultado >= 0
         ? resultado
-        : null
-}
+        : null;
+};
 
 // Filtros seleccionados
-const buscar = texto('buscar')
-const precioMin = numero('precioMin')
-const precioMax = numero('precioMax')
-const material = texto('material')
-const piedra = texto('piedra')
-const color = texto('color')
-const orden = texto('orden')
-const disponible = parametros.get('disponible') === 'true'
+const buscar = texto("buscar");
+const precioMin = numero("precioMin");
+const precioMax = numero("precioMax");
+const material = texto("material");
+const piedra = texto("piedra");
+const color = texto("color");
+const orden = texto("orden");
+const disponible = parametros.get("disponible") === "true";
 
-// Datos del catalogo
-let categoria: Categoria | null = null
-let categorias: Categoria[] = []
-let productos: Producto[] = []
-let error: string | null = null
+// Datos del catálogo
+let categoria: Categoria | null = null;
+let categorias: Categoria[] = [];
+let productos: Producto[] = [];
+let error: string | null = null;
 
-// Consultar los productos de la categoria
 try {
     const data = await graphqlRequest<CatalogoData>(
         QUERY_CATALOGO,
@@ -124,15 +131,19 @@ try {
             disponible: disponible ? true : null,
             orden: orden || null,
         }
-    )
+    );
 
-    categoria = data.categoria
-    categorias = data.categorias
-    productos = data.products
+    categoria = data.categoria;
+    categorias = data.categorias;
+    productos = data.products;
 
 } catch (err) {
-    console.error('[Categoria] Error:', err)
-    error = 'No se pudo cargar la categoría.'
+    console.error("[Categoria] Error:", err);
+
+    error = t(
+        "No se pudo cargar la categoría.",
+        "Could not load the category."
+    );
 }
 ---
 
@@ -140,7 +151,7 @@ try {
     title={
         categoria
             ? `${categoria.nombre} | ALMĀS`
-            : 'Categoría | ALMĀS'
+            : t("Categoría | ALMĀS", "Category | ALMĀS")
     }
 >
 
@@ -160,15 +171,34 @@ try {
                 ) : !categoria ? (
 
                     <div class="sin-resultados">
-                        <h2>Categoría no encontrada</h2>
+
+                        <h2>
+                            {
+                                t(
+                                    "Categoría no encontrada",
+                                    "Category not found"
+                                )
+                            }
+                        </h2>
 
                         <p>
-                            La categoría que buscas no está disponible.
+                            {
+                                t(
+                                    "La categoría que buscas no está disponible.",
+                                    "The category you are looking for is unavailable."
+                                )
+                            }
                         </p>
 
-                        <a href="/">
-                            Volver al catálogo
+                        <a href={rutaLocalizada("/", idioma)}>
+                            {
+                                t(
+                                    "Volver al catálogo",
+                                    "Back to catalog"
+                                )
+                            }
                         </a>
+
                     </div>
 
                 ) : (
@@ -176,7 +206,6 @@ try {
                     <>
                         <h1>{categoria.nombre}</h1>
 
-                        <!-- Filtros compartidos con el catalogo general -->
                         <FiltrosCatalogo
                             categoriaId={categoryId}
                             parametros={parametros}
@@ -185,8 +214,14 @@ try {
                         <p class="resultados">
                             {
                                 productos.length === 1
-                                    ? '1 producto encontrado'
-                                    : `${productos.length} productos encontrados`
+                                    ? t(
+                                        "1 producto encontrado",
+                                        "1 product found"
+                                    )
+                                    : t(
+                                        `${productos.length} productos encontrados`,
+                                        `${productos.length} products found`
+                                    )
                             }
                         </p>
 
@@ -194,16 +229,41 @@ try {
                             productos.length === 0 ? (
 
                                 <div class="sin-resultados">
-                                    <h2>Sin resultados</h2>
+
+                                    <h2>
+                                        {
+                                            t(
+                                                "Sin resultados",
+                                                "No results"
+                                            )
+                                        }
+                                    </h2>
 
                                     <p>
-                                        No encontramos productos que coincidan
-                                        con los filtros seleccionados.
+                                        {
+                                            t(
+                                                "No encontramos productos que coincidan con los filtros seleccionados.",
+                                                "No products match the selected filters."
+                                            )
+                                        }
                                     </p>
 
-                                    <a href={`/categoria/${categoryId}`}>
-                                        Limpiar filtros
+                                    <a
+                                        href={
+                                            rutaLocalizada(
+                                                `/categoria/${categoryId}`,
+                                                idioma
+                                            )
+                                        }
+                                    >
+                                        {
+                                            t(
+                                                "Limpiar filtros",
+                                                "Clear filters"
+                                            )
+                                        }
                                     </a>
+
                                 </div>
 
                             ) : (
@@ -241,19 +301,25 @@ try {
 <style>
     .content {
         display: flex;
+        flex-direction: column;
+        width: 100%;
+        max-width: var(--content-max-width);
+        margin-inline: auto;
     }
 
     main {
         flex: 1;
+        width: 100%;
         min-width: 0;
-        min-height: 80vh;
-        padding: 2rem;
+        min-height: 80dvh;
+        padding: var(--page-padding);
     }
 
     h1 {
         font-family: var(--font-heading);
         color: var(--color-purple);
         margin: 0 0 1.5rem;
+        overflow-wrap: anywhere;
     }
 
     .resultados {
@@ -264,17 +330,17 @@ try {
 
     .products {
         display: grid;
-        grid-template-columns:
-            repeat(auto-fill, minmax(200px, 1fr));
-        gap: 1.5rem;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 12px;
     }
 
     .sin-resultados {
-        padding: 3rem 1.5rem;
+        padding: 2rem 1rem;
         text-align: center;
         background: #fffaf6;
         border: 1px solid #eadbc8;
         border-radius: 16px;
+        overflow-wrap: anywhere;
     }
 
     .sin-resultados h2 {
@@ -295,6 +361,7 @@ try {
         border-radius: 10px;
         text-decoration: none;
         font-weight: 600;
+        max-width: 100%;
     }
 
     .sin-resultados a:hover {
@@ -305,13 +372,31 @@ try {
         color: #a00;
     }
 
-    @media (max-width: 600px) {
+    @media (min-width: 360px) {
+        .products {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
+    @media (min-width: 768px) {
         .content {
-            flex-direction: column;
+            flex-direction: row;
         }
 
-        main {
-            padding: 1rem;
+        .products {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 16px;
+        }
+
+        .sin-resultados {
+            padding: 3rem 1.5rem;
+        }
+    }
+
+    @media (min-width: 1200px) {
+        .products {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 24px;
         }
     }
 </style>

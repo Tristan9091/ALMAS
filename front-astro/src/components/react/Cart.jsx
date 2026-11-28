@@ -1,16 +1,22 @@
 import { useCartStore } from "../../store/useCartStore";
+import { traducir, rutaLocalizada } from "../../i18n/utils";
 import "../../styles/cart.css";
 
-export default function Cart() {
+export default function Cart({ idioma = "es" }) {
   const cart = useCartStore((state) => state.cart);
-
   const increaseQuantity = useCartStore((state) => state.increaseQuantity);
-
   const decreaseQuantity = useCartStore((state) => state.decreaseQuantity);
-
   const removeFromCart = useCartStore((state) => state.removeFromCart);
-
   const clearCart = useCartStore((state) => state.clearCart);
+
+  const t = (es, en) => traducir(idioma, es, en);
+
+  const moneda = (cantidad) =>
+    new Intl.NumberFormat(idioma === "en" ? "en-US" : "es-MX", {
+      style: "currency",
+      currency: "MXN",
+      currencyDisplay: "code",
+    }).format(cantidad);
 
   const total = cart.reduce(
     (sum, item) => sum + item.precio * item.cantidad,
@@ -19,16 +25,18 @@ export default function Cart() {
 
   if (cart.length === 0) {
     return (
-      <div>
-        <p>Tu carrito está vacío.</p>
+      <div className="carrito-ui">
+        <p>{t("Tu carrito está vacío.", "Your cart is empty.")}</p>
 
-        <a href="/">Volver al catálogo</a>
+        <a href={rutaLocalizada("/", idioma)}>
+          {t("Volver al catálogo", "Back to catalog")}
+        </a>
       </div>
     );
   }
 
   return (
-    <div>
+    <div className="carrito-ui">
       <div className="cart-list">
         {cart.map((item) => (
           <article className="cart-item" key={item.cartKey}>
@@ -38,43 +46,56 @@ export default function Cart() {
             />
 
             <div className="info">
-              <h3>{item.variante && <p>{item.variante}</p>}</h3>
+              <h2>{item.nombre}</h2>
 
-              <p>${item.precio.toLocaleString("es-MX")}</p>
+              {item.variante && <p>{item.variante}</p>}
+
+              <p>{moneda(item.precio)}</p>
             </div>
 
             <div className="quantity">
-              <button onClick={() => decreaseQuantity(item.cartKey)}>−</button>
+              <button
+                type="button"
+                aria-label={t("Disminuir cantidad", "Decrease quantity")}
+                onClick={() => decreaseQuantity(item.cartKey)}
+              >
+                −
+              </button>
 
               <span>{item.cantidad}</span>
 
-              <button onClick={() => increaseQuantity(item.cartKey)}>+</button>
+              <button
+                type="button"
+                aria-label={t("Aumentar cantidad", "Increase quantity")}
+                onClick={() => increaseQuantity(item.cartKey)}
+              >
+                +
+              </button>
             </div>
 
-            <p className="subtotal">
-              ${(item.precio * item.cantidad).toLocaleString("es-MX")}
-            </p>
+            <p className="subtotal">{moneda(item.precio * item.cantidad)}</p>
 
             <button
+              type="button"
               className="remove"
               onClick={() => removeFromCart(item.cartKey)}
             >
-              Eliminar
+              {t("Eliminar", "Remove")}
             </button>
           </article>
         ))}
       </div>
 
       <div className="summary">
-        <h2>Total: ${total.toLocaleString("es-MX")}</h2>
+        <h2>Total: {moneda(total)}</h2>
 
         <div className="actions">
-          <button className="clear" onClick={clearCart}>
-            Vaciar carrito
+          <button type="button" className="clear" onClick={clearCart}>
+            {t("Vaciar carrito", "Clear cart")}
           </button>
 
-          <a className="checkout" href="/checkout">
-            Continuar al checkout
+          <a className="checkout" href={rutaLocalizada("/checkout", idioma)}>
+            {t("Continuar al checkout", "Proceed to checkout")}
           </a>
         </div>
       </div>

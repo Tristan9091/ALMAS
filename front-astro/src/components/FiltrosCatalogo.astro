@@ -1,151 +1,258 @@
 
 ---
+import {
+    obtenerIdioma,
+    rutaLocalizada,
+    traducir
+} from "../i18n/utils";
+
 interface Props {
-    categoriaId?: number
-    parametros: URLSearchParams
+    categoriaId?: number;
+    parametros: URLSearchParams;
 }
 
-const { categoriaId, parametros } = Astro.props
+const { categoriaId, parametros } = Astro.props;
 
-const ruta = categoriaId !== undefined
-    ? `/categoria/${categoriaId}`
-    : '/'
+const idioma = obtenerIdioma(Astro.url.pathname);
+const t = (es: string, en: string) => traducir(idioma, es, en);
+
+const ruta = rutaLocalizada(
+    categoriaId !== undefined
+        ? `/categoria/${categoriaId}`
+        : "/",
+    idioma
+);
 
 const valor = (nombre: string) =>
-    parametros.get(nombre) ?? ''
+    parametros.get(nombre) ?? "";
 
-const orden = valor('orden')
-const disponible = valor('disponible') === 'true'
+const orden = valor("orden");
+const disponible = valor("disponible") === "true";
 ---
 
 <form method="GET" action={ruta} class="filtros-catalogo">
 
     <div class="filtro-campo filtro-busqueda">
-        <label for="filtro-buscar">Buscar productos</label>
+
+        <label for="filtro-buscar">
+            {t("Buscar productos", "Search products")}
+        </label>
+
         <div class="filtro-control">
+
             <input
                 id="filtro-buscar"
                 type="search"
                 name="buscar"
-                placeholder="Nombre o descripción..."
-                value={valor('buscar')}
+                placeholder={
+                    t(
+                        "Nombre o descripción...",
+                        "Name or description..."
+                    )
+                }
+                value={valor("buscar")}
             />
+
         </div>
+
     </div>
 
     <div class="filtro-campo filtro-precio">
-        <label for="filtro-min">Precio mínimo</label>
+
+        <label for="filtro-min">
+            {t("Precio mínimo", "Minimum price")}
+        </label>
+
         <div class="filtro-control con-moneda">
+
             <span class="simbolo-moneda">$</span>
+
             <input
                 id="filtro-min"
                 type="number"
                 name="precioMin"
                 min="0"
                 step="0.01"
-                placeholder="Desde"
-                value={valor('precioMin')}
+                placeholder={t("Desde", "From")}
+                value={valor("precioMin")}
             />
+
         </div>
+
     </div>
 
     <div class="filtro-campo filtro-precio">
-        <label for="filtro-max">Precio máximo</label>
+
+        <label for="filtro-max">
+            {t("Precio máximo", "Maximum price")}
+        </label>
+
         <div class="filtro-control con-moneda">
+
             <span class="simbolo-moneda">$</span>
+
             <input
                 id="filtro-max"
                 type="number"
                 name="precioMax"
                 min="0"
                 step="0.01"
-                placeholder="Hasta"
-                value={valor('precioMax')}
+                placeholder={t("Hasta", "To")}
+                value={valor("precioMax")}
             />
+
         </div>
+
     </div>
 
     <div class="filtro-campo filtro-atributo">
-        <label for="filtro-material">Material</label>
+
+        <label for="filtro-material">
+            {t("Material", "Material")}
+        </label>
+
         <div class="filtro-control">
+
             <input
                 id="filtro-material"
                 type="text"
                 name="material"
-                placeholder="Ej. Oro"
-                value={valor('material')}
+                placeholder={t("Ej. Oro", "E.g. Oro")}
+                value={valor("material")}
             />
+
         </div>
+
     </div>
 
     <div class="filtro-campo filtro-atributo">
-        <label for="filtro-piedra">Piedra</label>
+
+        <label for="filtro-piedra">
+            {t("Piedra", "Gemstone")}
+        </label>
+
         <div class="filtro-control">
+
             <input
                 id="filtro-piedra"
                 type="text"
                 name="piedra"
-                placeholder="Ej. Diamante"
-                value={valor('piedra')}
+                placeholder={t("Ej. Diamante", "E.g. Diamante")}
+                value={valor("piedra")}
             />
+
         </div>
+
     </div>
 
     <div class="filtro-campo filtro-atributo">
-        <label for="filtro-color">Color</label>
+
+        <label for="filtro-color">
+            {t("Color", "Color")}
+        </label>
+
         <div class="filtro-control">
+
             <input
                 id="filtro-color"
                 type="text"
                 name="color"
-                placeholder="Ej. Dorado"
-                value={valor('color')}
+                placeholder={t("Ej. Dorado", "E.g. Dorado")}
+                value={valor("color")}
             />
+
         </div>
+
     </div>
 
     <div class="filtro-campo filtro-orden">
-        <label for="filtro-orden">Ordenar productos</label>
+
+        <label for="filtro-orden">
+            {t("Ordenar productos", "Sort products")}
+        </label>
+
         <div class="filtro-control">
+
             <select id="filtro-orden" name="orden">
-                <option value="">Predeterminado</option>
-                <option value="precio_asc" selected={orden === 'precio_asc'}>
-                    Menor precio
+
+                <option value="">
+                    {t("Predeterminado", "Default")}
                 </option>
-                <option value="precio_desc" selected={orden === 'precio_desc'}>
-                    Mayor precio
+
+                <option
+                    value="precio_asc"
+                    selected={orden === "precio_asc"}
+                >
+                    {t("Menor precio", "Lowest price")}
                 </option>
-                <option value="nombre_asc" selected={orden === 'nombre_asc'}>
-                    Nombre A-Z
+
+                <option
+                    value="precio_desc"
+                    selected={orden === "precio_desc"}
+                >
+                    {t("Mayor precio", "Highest price")}
                 </option>
-                <option value="nombre_desc" selected={orden === 'nombre_desc'}>
-                    Nombre Z-A
+
+                <option
+                    value="nombre_asc"
+                    selected={orden === "nombre_asc"}
+                >
+                    {t("Nombre A-Z", "Name A-Z")}
                 </option>
-                <option value="recientes" selected={orden === 'recientes'}>
-                    Más recientes
+
+                <option
+                    value="nombre_desc"
+                    selected={orden === "nombre_desc"}
+                >
+                    {t("Nombre Z-A", "Name Z-A")}
                 </option>
+
+                <option
+                    value="recientes"
+                    selected={orden === "recientes"}
+                >
+                    {t("Más recientes", "Newest")}
+                </option>
+
             </select>
+
         </div>
+
     </div>
 
+    {
+        idioma === "en" && (
+            <p class="aviso-filtros">
+                Catalog data is currently stored in Spanish.
+                Use Spanish terms when searching by name,
+                material, gemstone or color.
+            </p>
+        )
+    }
+
     <label class="filtro-disponible">
+
         <input
             type="checkbox"
             name="disponible"
             value="true"
             checked={disponible}
         />
-        Solo disponibles
+
+        {t("Solo disponibles", "In stock only")}
+
     </label>
 
     <div class="filtro-acciones">
+
         <button type="submit" class="boton-aplicar">
-            Aplicar filtros
+            {t("Aplicar filtros", "Apply filters")}
         </button>
 
         <a href={ruta} class="boton-limpiar">
-            Limpiar
+            {t("Limpiar", "Clear")}
         </a>
+
     </div>
 
 </form>
@@ -155,9 +262,14 @@ const disponible = valor('disponible') === 'true'
         display: flex;
         align-items: flex-end;
         flex-wrap: wrap;
-        gap: 1rem;
+        gap: 0.85rem;
+
+        width: 100%;
+        min-width: 0;
+
         margin: 1.5rem 0 2rem;
-        padding: 1.5rem;
+        padding: 1rem;
+
         background: #fffaf6;
         border: 1px solid #eadbc8;
         border-radius: 16px;
@@ -168,39 +280,30 @@ const disponible = valor('disponible') === 'true'
         flex-direction: column;
         gap: 0.5rem;
         min-width: 0;
+        flex: 1 1 100%;
     }
 
     .filtro-campo label {
         font-size: 0.85rem;
         font-weight: 600;
         color: var(--color-purple);
-    }
-
-    .filtro-busqueda {
-        flex: 1.5 1 190px;
-    }
-
-    .filtro-precio {
-        flex: 1 1 125px;
-    }
-
-    .filtro-atributo {
-        flex: 1 1 145px;
-    }
-
-    .filtro-orden {
-        flex: 1.2 1 160px;
+        overflow-wrap: anywhere;
     }
 
     .filtro-control {
         display: flex;
         align-items: center;
+        min-width: 0;
         height: 44px;
+
         background: #ffffff;
         border: 1px solid #dcc9b4;
         border-radius: 10px;
         overflow: hidden;
-        transition: border-color 0.2s, box-shadow 0.2s;
+
+        transition:
+            border-color 0.2s,
+            box-shadow 0.2s;
     }
 
     .filtro-control:focus-within {
@@ -214,12 +317,14 @@ const disponible = valor('disponible') === 'true'
         min-width: 0;
         height: 100%;
         padding: 0 0.85rem;
+
         border: none;
         outline: none;
         background: transparent;
+
         color: #43223d;
         font-family: inherit;
-        font-size: 0.9rem;
+        font-size: 1rem;
     }
 
     .filtro-control input::placeholder {
@@ -235,6 +340,7 @@ const disponible = valor('disponible') === 'true'
         padding-left: 0.85rem;
         color: #a47b35;
         font-weight: 600;
+        flex-shrink: 0;
     }
 
     .con-moneda input {
@@ -257,9 +363,11 @@ const disponible = valor('disponible') === 'true'
         align-items: center;
         gap: 0.5rem;
         min-height: 44px;
+
         font-size: 0.85rem;
         font-weight: 600;
         color: var(--color-purple);
+
         cursor: pointer;
     }
 
@@ -267,27 +375,40 @@ const disponible = valor('disponible') === 'true'
         accent-color: var(--color-purple);
         width: 17px;
         height: 17px;
+        flex-shrink: 0;
     }
 
     .filtro-acciones {
         display: flex;
         align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
         gap: 0.75rem;
+
+        width: 100%;
+        min-width: 0;
         min-height: 44px;
     }
 
     .boton-aplicar {
-        height: 44px;
-        padding: 0 1.1rem;
+        flex: 1;
+        min-height: 44px;
+        padding: 0.7rem 1.1rem;
+
         border: none;
         border-radius: 10px;
+
         background: var(--color-purple);
         color: #ffffff;
+
         font-family: inherit;
         font-weight: 600;
+
         cursor: pointer;
-        white-space: nowrap;
-        transition: background 0.2s, transform 0.2s;
+
+        transition:
+            background 0.2s,
+            transform 0.2s;
     }
 
     .boton-aplicar:hover {
@@ -300,45 +421,79 @@ const disponible = valor('disponible') === 'true'
         font-size: 0.9rem;
         font-weight: 600;
         text-decoration: none;
+        padding-block: 8px;
     }
 
     .boton-limpiar:hover {
         text-decoration: underline;
     }
 
-    @media (max-width: 900px) {
-        .filtros-catalogo {
-            gap: 0.85rem;
-        }
-
-        .filtro-busqueda {
-            flex-basis: 100%;
-        }
+    .boton-aplicar:focus-visible,
+    .boton-limpiar:focus-visible {
+        outline: 2px solid var(--color-purple);
+        outline-offset: 3px;
     }
 
-    @media (max-width: 600px) {
-        .filtros-catalogo {
-            padding: 1rem;
-            gap: 0.85rem;
-        }
+    .aviso-filtros {
+        width: 100%;
+        margin: 0;
+        color: #66515f;
+        font-size: 0.8rem;
+        line-height: 1.5;
+    }
 
-        .filtro-busqueda,
-        .filtro-orden {
-            flex-basis: 100%;
-        }
+    @media (min-width: 360px) {
 
         .filtro-precio,
         .filtro-atributo {
             flex: 1 1 calc(50% - 0.5rem);
         }
 
+    }
+
+    @media (min-width: 768px) {
+
+        .filtros-catalogo {
+            padding: 1.25rem;
+            gap: 1rem;
+        }
+
+        .filtro-busqueda {
+            flex: 1.5 1 190px;
+        }
+
+        .filtro-precio {
+            flex: 1 1 125px;
+        }
+
+        .filtro-atributo {
+            flex: 1 1 145px;
+        }
+
+        .filtro-orden {
+            flex: 1.2 1 160px;
+        }
+
         .filtro-acciones {
-            width: 100%;
-            justify-content: space-between;
+            width: auto;
         }
 
         .boton-aplicar {
-            flex: 1;
+            flex: initial;
         }
+
+    }
+
+    @media (min-width: 1200px) {
+
+        .filtros-catalogo {
+            padding: 1.5rem;
+        }
+
+        .filtro-control input,
+        .filtro-control select {
+            font-size: 0.9rem;
+        }
+
     }
 </style>

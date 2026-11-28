@@ -1,0 +1,72 @@
+
+---
+import {
+    obtenerIdioma,
+    rutaLocalizada
+} from "../../i18n/utils";
+
+const idioma = obtenerIdioma(Astro.url.pathname);
+
+const urlEs =
+    rutaLocalizada(Astro.url.pathname, "es") +
+    Astro.url.search;
+
+const urlEn =
+    rutaLocalizada(Astro.url.pathname, "en") +
+    Astro.url.search;
+---
+
+<nav
+    class="idiomas"
+    aria-label={idioma === "es" ? "Idioma" : "Language"}
+>
+    <a
+        href={urlEs}
+        lang="es"
+        hreflang="es"
+        class:list={[{ activo: idioma === "es" }]}
+        aria-current={idioma === "es" ? "true" : undefined}
+    >
+        ES
+    </a>
+
+    <span aria-hidden="true">|</span>
+
+    <a
+        href={urlEn}
+        lang="en"
+        hreflang="en"
+        class:list={[{ activo: idioma === "en" }]}
+        aria-current={idioma === "en" ? "true" : undefined}
+    >
+        EN
+    </a>
+</nav>
+
+<style>
+    .idiomas {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: white;
+        font-size: 13px;
+        flex-shrink: 0;
+    }
+
+    a {
+        color: white;
+        text-decoration: none;
+        padding: 8px 4px;
+    }
+
+    a.activo {
+        color: var(--color-gold);
+        font-weight: bold;
+        text-decoration: underline;
+    }
+
+    a:focus-visible {
+        outline: 2px solid var(--color-gold);
+        border-radius: 4px;
+    }
+</style>

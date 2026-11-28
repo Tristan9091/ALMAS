@@ -1,20 +1,23 @@
+
 ---
-import Layout from '../layouts/Layout.astro'
-import RegisterForm from '../components/react/RegisterForm.jsx'
+import Layout from "../layouts/Layout.astro";
+import RegisterForm from "../components/react/RegisterForm.jsx";
+
+import {
+    obtenerIdioma,
+    traducir
+} from "../i18n/utils";
+
+const idioma = obtenerIdioma(Astro.url.pathname);
+const t = (es: string, en: string) => traducir(idioma, es, en);
 ---
 
-<Layout title="Crear cuenta | ALMĀS">
+<Layout title={t("Crear cuenta | ALMĀS", "Create account | ALMĀS")}>
 
     <main class="auth-page">
-        <RegisterForm client:load />
+
+        <RegisterForm client:load idioma={idioma} />
+
     </main>
 
 </Layout>
-
-<style>
-    .auth-page {
-        max-width: 450px;
-        margin: 4rem auto;
-        padding: 2rem;
-    }
-</style>

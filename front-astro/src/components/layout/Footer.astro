@@ -1,9 +1,14 @@
+
 ---
-const year = new Date().getFullYear()
+import { obtenerIdioma, traducir } from "../../i18n/utils";
+
+const year = new Date().getFullYear();
+const idioma = obtenerIdioma(Astro.url.pathname);
 ---
 
 <footer>
-    © {year} ALMĀS joyería artesanal
+    © {year} ALMĀS
+    {traducir(idioma, "joyería artesanal", "handcrafted jewelry")}
 </footer>
 
 <style>

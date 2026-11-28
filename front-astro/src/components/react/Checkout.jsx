@@ -1,24 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useCartStore } from "../../store/useCartStore";
 import { graphqlAuthRequest } from "../../graphql/client";
+import { traducir, rutaLocalizada } from "../../i18n/utils";
 import FormularioTarjeta from "./FormularioTarjeta";
 import DireccionGeoapify from "./DireccionGeoapify";
 import "../../styles/checkout.css";
 
-/**
- * Checkout en dos pasos:
- * 1. Crear el pedido con precios validados por el backend.
- * 2. Tokenizar la tarjeta y solicitar el cobro a Mercado Pago.
- *
- * Nunca se permite repetir un cobro cuando su resultado
- * no ha sido confirmado.
- */
-
 const PAGOS_REANUDABLES = [null, "rejected", "cancelled"];
 
-export default function Checkout() {
+export default function Checkout({ idioma = "es" }) {
   const cart = useCartStore((state) => state.cart);
   const clearCart = useCartStore((state) => state.clearCart);
+
+  const t = useCallback((es, en) => traducir(idioma, es, en), [idioma]);
+
+  const ruta = useCallback((path) => rutaLocalizada(path, idioma), [idioma]);
+
+  const moneda = (cantidad) =>
+    new Intl.NumberFormat(idioma === "en" ? "en-US" : "es-MX", {
+      style: "currency",
+      currency: "MXN",
+      currencyDisplay: "code",
+    }).format(Number(cantidad));
 
   const [nombre, setNombre] = useState("");
   const [email, setEmail] = useState("");
@@ -34,13 +37,12 @@ export default function Checkout() {
   const [detallesPedido, setDetallesPedido] = useState(null);
   const [errorReanudar, setErrorReanudar] = useState(null);
 
-  // Bloquea el formulario si no se conoce el resultado del cobro.
+  // Bloquea nuevos intentos si el resultado es incierto.
   const [pagoBloqueado, setPagoBloqueado] = useState(false);
 
-  // Evita solicitudes simultaneas desde el Brick.
+  // Evita solicitudes simultáneas de pago.
   const cobroEnCurso = useRef(false);
 
-  // Recupera un mensaje de rechazo despues de reiniciar el Brick.
   useEffect(() => {
     const mensaje = sessionStorage.getItem("almas-error-pago");
 
@@ -74,9 +76,12 @@ export default function Checkout() {
           !PAGOS_REANUDABLES.includes(existente.estadoPago ?? null)
         ) {
           setErrorReanudar(
-            "Este pedido ya no se puede pagar desde aqui. " +
-              "Revisa su estado en Mis pedidos.",
+            t(
+              "Este pedido ya no se puede pagar desde aquí. Revisa su estado en Mis pedidos.",
+              "This order can no longer be paid here. Check its status in My orders.",
+            ),
           );
+
           return;
         }
 
@@ -89,13 +94,17 @@ export default function Checkout() {
       } catch (err) {
         console.error("Error al reanudar pedido:", err);
 
-        setErrorReanudar(err?.message || "No se pudo cargar el pedido.");
+        setErrorReanudar(
+          idioma === "es"
+            ? err?.message || "No se pudo cargar el pedido."
+            : "Could not load the order.",
+        );
       }
     };
 
     const verificarSesion = async () => {
       if (!localStorage.getItem("almas-token")) {
-        window.location.href = "/login";
+        window.location.href = ruta("/login");
         return;
       }
 
@@ -105,12 +114,12 @@ export default function Checkout() {
         setNombre((actual) => actual || data.me.nombre);
         setEmail((actual) => actual || data.me.email);
       } catch (err) {
-        console.error("Error de autenticacion:", err);
+        console.error("Error de autenticación:", err);
 
         localStorage.removeItem("almas-token");
         localStorage.removeItem("almas-user");
 
-        window.location.href = "/login";
+        window.location.href = ruta("/login");
         return;
       }
 
@@ -119,7 +128,7 @@ export default function Checkout() {
     };
 
     verificarSesion();
-  }, []);
+  }, [idioma, ruta, t]);
 
   // PASO 1: CREAR PEDIDO
   const continuarAlPago = async (event) => {
@@ -136,6 +145,7 @@ export default function Checkout() {
           nombreComprador: nombre,
           emailComprador: email,
           direccionEnvio: direccion,
+
           detalles: cart.map((item) => ({
             productoId: item.id,
             varianteId: item.varianteId ?? null,
@@ -145,14 +155,23 @@ export default function Checkout() {
       });
 
       if (!data?.crearPedido?.id) {
-        throw new Error("No se recibio el numero de pedido.");
+        throw new Error(
+          t(
+            "No se recibió el número de pedido.",
+            "The order number was not received.",
+          ),
+        );
       }
 
       setPedido(data.crearPedido);
     } catch (err) {
       console.error("Error al crear pedido:", err);
 
-      setError(err?.message || "No se pudo crear el pedido.");
+      setError(
+        idioma === "es"
+          ? err?.message || "No se pudo crear el pedido."
+          : "Could not create the order. Please check your information and try again.",
+      );
     } finally {
       setLoading(false);
     }
@@ -180,7 +199,7 @@ export default function Checkout() {
 
         if (!r || !r.estadoPago || !r.estatusPedido) {
           throw new Error(
-            "El servidor no devolvio un resultado de pago valido.",
+            "El servidor no devolvió un resultado de pago válido.",
           );
         }
 
@@ -189,15 +208,16 @@ export default function Checkout() {
         const rechazado = ["rejected", "cancelled"].includes(r.estadoPago);
 
         // RECHAZO CONFIRMADO
-        // Se puede reintentar sobre el mismo pedido.
         if (rechazado && !incidencia && !r.aprobado) {
           const mensaje =
-            r.mensaje || "Tu pago fue rechazado. Intenta con otra tarjeta.";
+            idioma === "es"
+              ? r.mensaje || "Tu pago fue rechazado. Intenta con otra tarjeta."
+              : "Your payment was declined or cancelled. Please try another card.";
 
           sessionStorage.setItem("almas-error-pago", mensaje);
 
           // Reinicia el Brick para obtener un token nuevo.
-          window.location.replace(`/checkout?pedido=${pedido.id}`);
+          window.location.replace(`${ruta("/checkout")}?pedido=${pedido.id}`);
 
           return;
         }
@@ -208,51 +228,52 @@ export default function Checkout() {
         }
 
         // Aprobado, pendiente o incidencia.
-        // Se oculta el formulario de pago.
         setResultado(r);
       } catch (err) {
         console.error("Error durante el procesamiento del pago:", err);
 
-        const mensaje = err?.message || "Ocurrio un error al procesar el pago.";
+        const mensaje = err?.message || "Ocurrió un error al procesar el pago.";
 
         const esIncierto = mensaje.includes("PAGO_INCIERTO");
 
-        // Nunca habilitar otro cobro solamente porque
-        // la solicitud GraphQL haya fallado.
+        // No permitir otro cobro ante un error no confirmado.
         setPagoBloqueado(true);
 
         if (esIncierto) {
-          // El backend identifico un resultado incierto.
           setResultado({
             pedidoId: pedido.id,
             aprobado: false,
             estatusPedido: "pendiente",
             estadoPago: "verificacion",
             total: pedido.total,
-            mensaje:
-              "No pudimos confirmar si se realizo el cobro. " +
-              "Conserva el numero de pedido y contacta " +
-              "a la tienda antes de hacer otro intento. " +
-              "No vuelvas a pagar este pedido.",
+
+            mensaje: t(
+              "No pudimos confirmar si se realizó el cobro. Conserva el número de pedido y contacta a la tienda antes de hacer otro intento. No vuelvas a pagar este pedido.",
+              "We could not confirm whether you were charged. Keep your order number and contact the store. Do not pay for this order again.",
+            ),
           });
         } else {
-          // Error no clasificado: mostramos el motivo
-          // sin afirmar que el pago fue rechazado.
           setError(
-            "No se pudo completar la solicitud de pago: " +
-              mensaje +
-              " Verifica el estado del pedido antes de volver a pagar.",
+            idioma === "es"
+              ? "No se pudo completar la solicitud de pago: " +
+                  mensaje +
+                  " Verifica el estado del pedido antes de volver a pagar."
+              : "The payment request could not be completed. Check your order status before attempting another payment.",
           );
         }
       } finally {
         cobroEnCurso.current = false;
       }
     },
-    [pedido, clearCart, detallesPedido, pagoBloqueado],
+    [pedido, clearCart, detallesPedido, pagoBloqueado, idioma, ruta, t],
   );
 
   if (checkingAuth) {
-    return <p>Comprobando sesión...</p>;
+    return (
+      <p role="status">
+        {t("Comprobando sesión...", "Checking your session...")}
+      </p>
+    );
   }
 
   // RESULTADO DEL PAGO
@@ -262,35 +283,52 @@ export default function Checkout() {
     const aprobado = resultado.aprobado && !incidencia;
 
     const titulo = aprobado
-      ? "¡Gracias por tu compra!"
+      ? t("¡Gracias por tu compra!", "Thank you for your purchase!")
       : incidencia
-        ? "Tu pago necesita revisión"
+        ? t("Tu pago necesita revisión", "Your payment requires review")
         : resultado.estadoPago === "verificacion"
-          ? "No pudimos confirmar tu pago"
-          : "Tu pago está en revisión";
+          ? t(
+              "No pudimos confirmar tu pago",
+              "We could not confirm your payment",
+            )
+          : t("Tu pago está en revisión", "Your payment is under review");
+
+    const mensajeResultado =
+      idioma === "es"
+        ? resultado.mensaje
+        : aprobado
+          ? "Your payment has been approved."
+          : resultado.estadoPago === "verificacion"
+            ? "We could not confirm whether you were charged. Contact the store before attempting another payment."
+            : "Your payment requires verification. Please check your order status and contact the store.";
 
     return (
       <div className={`success ${aprobado ? "" : "en-revision"}`}>
         <h2>{titulo}</h2>
 
-        <p>{resultado.mensaje}</p>
+        <p>{mensajeResultado}</p>
 
         <p>
-          Pedido #{resultado.pedidoId} · Total $
-          {Number(resultado.total).toLocaleString("es-MX")}
+          {t("Pedido", "Order")} #{resultado.pedidoId}
+          {" · "}
+          Total: {moneda(resultado.total)}
         </p>
 
         {!aprobado && (
           <p className="checkout-nota">
-            No realices otro pago de este pedido hasta confirmar su estado con
-            la tienda.
+            {t(
+              "No realices otro pago de este pedido hasta confirmar su estado con la tienda.",
+              "Do not pay for this order again until its status has been confirmed with the store.",
+            )}
           </p>
         )}
 
-        <a href="/mis-pedidos">Ver mis pedidos</a>
+        <a href={ruta("/mis-pedidos")}>
+          {t("Ver mis pedidos", "View my orders")}
+        </a>
 
         <p>
-          <a href="/">Volver al catálogo</a>
+          <a href={ruta("/")}>{t("Volver al catálogo", "Back to catalog")}</a>
         </p>
       </div>
     );
@@ -300,19 +338,24 @@ export default function Checkout() {
   if (errorReanudar) {
     return (
       <div>
-        <p className="error">{errorReanudar}</p>
+        <p className="error" role="alert">
+          {errorReanudar}
+        </p>
 
-        <a href="/mis-pedidos">Ir a Mis pedidos</a>
+        <a href={ruta("/mis-pedidos")}>
+          {t("Ir a Mis pedidos", "Go to My orders")}
+        </a>
       </div>
     );
   }
 
-  // CARRITO VACIO
+  // CARRITO VACÍO
   if (cart.length === 0 && !pedido) {
     return (
       <div>
-        <p>Tu carrito está vacío.</p>
-        <a href="/">Volver al catálogo</a>
+        <p>{t("Tu carrito está vacío.", "Your cart is empty.")}</p>
+
+        <a href={ruta("/")}>{t("Volver al catálogo", "Back to catalog")}</a>
       </div>
     );
   }
@@ -320,14 +363,21 @@ export default function Checkout() {
   return (
     <div className="checkout">
       {!pedido ? (
-        // PASO 1: DATOS DE ENVIO
+        // PASO 1: DATOS DE ENVÍO
         <form onSubmit={continuarAlPago}>
-          <p className="checkout-paso">Paso 1 de 2 · Datos de envío</p>
+          <p className="checkout-paso">
+            {t(
+              "Paso 1 de 2 · Datos de envío",
+              "Step 1 of 2 · Shipping details",
+            )}
+          </p>
 
           <label>
-            Nombre
+            {t("Nombre", "Name")}
+
             <input
               type="text"
+              autoComplete="name"
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
               required
@@ -335,31 +385,47 @@ export default function Checkout() {
           </label>
 
           <label>
-            Correo electrónico
+            {t("Correo electrónico", "Email address")}
+
             <input
               type="email"
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
             />
           </label>
 
-          <DireccionGeoapify value={direccion} onChange={setDireccion} />
-          {error && <p className="error">{error}</p>}
+          <DireccionGeoapify
+            idioma={idioma}
+            value={direccion}
+            onChange={setDireccion}
+          />
+
+          {error && (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          )}
 
           <button type="submit" disabled={loading}>
-            {loading ? "Creando pedido..." : "Continuar al pago"}
+            {loading
+              ? t("Creando pedido...", "Creating order...")
+              : t("Continuar al pago", "Continue to payment")}
           </button>
         </form>
       ) : (
         // PASO 2: TARJETA
         <div className="checkout-pago">
-          <p className="checkout-paso">Paso 2 de 2 · Pago con tarjeta</p>
+          <p className="checkout-paso">
+            {t("Paso 2 de 2 · Pago con tarjeta", "Step 2 of 2 · Card payment")}
+          </p>
 
           <p className="checkout-nota">
-            Pedido #{pedido.id}. Paga con tarjeta de crédito o débito. Los datos
-            de tu tarjeta los procesa Mercado Pago de forma segura; ALMĀS nunca
-            los ve.
+            {t(
+              `Pedido #${pedido.id}. Paga con tarjeta de crédito o débito. Mercado Pago procesa los datos de tu tarjeta de forma segura; ALMĀS no recibe los datos completos de la tarjeta.`,
+              `Order #${pedido.id}. Pay by credit or debit card. Mercado Pago securely processes your card details; ALMĀS does not receive your full card information.`,
+            )}
           </p>
 
           {error && (
@@ -371,14 +437,19 @@ export default function Checkout() {
           {pagoBloqueado ? (
             <div className="checkout-bloqueado">
               <p className="checkout-nota">
-                Por seguridad, el formulario de pago está bloqueado hasta
-                verificar el resultado del intento anterior.
+                {t(
+                  "Por seguridad, el formulario de pago está bloqueado hasta verificar el resultado del intento anterior.",
+                  "For your security, the payment form is locked until the previous payment attempt has been verified.",
+                )}
               </p>
 
-              <a href="/mis-pedidos">Consultar estado del pedido</a>
+              <a href={ruta("/mis-pedidos")}>
+                {t("Consultar estado del pedido", "Check order status")}
+              </a>
             </div>
           ) : (
             <FormularioTarjeta
+              idioma={idioma}
               monto={pedido.total}
               email={email}
               onPagar={pagar}
@@ -389,7 +460,7 @@ export default function Checkout() {
 
       {/* RESUMEN */}
       <aside className="order-summary">
-        <h2>Resumen</h2>
+        <h2>{t("Resumen", "Order summary")}</h2>
 
         {(detallesPedido
           ? detallesPedido.map((d, i) => ({
@@ -404,21 +475,18 @@ export default function Checkout() {
           <div className="summary-item" key={item.cartKey}>
             <span>
               {item.nombre}
-              {item.variante ? ` (${item.variante})` : ""} × {item.cantidad}
+              {item.variante ? ` (${item.variante})` : ""}
+              {" × "}
+              {item.cantidad}
             </span>
 
-            <span>
-              ${(item.precio * item.cantidad).toLocaleString("es-MX")}
-            </span>
+            <span>{moneda(item.precio * item.cantidad)}</span>
           </div>
         ))}
 
         <hr />
 
-        <strong>
-          Total: $
-          {(pedido ? pedido.total : totalCarrito).toLocaleString("es-MX")}
-        </strong>
+        <strong>Total: {moneda(pedido ? pedido.total : totalCarrito)}</strong>
       </aside>
     </div>
   );

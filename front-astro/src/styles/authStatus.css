@@ -1,89 +1,115 @@
 .auth-status {
   display: flex;
   align-items: center;
-  gap: 0.8rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+
+  min-width: 0;
+  max-width: 100%;
+  gap: 6px;
 }
 
 .auth-user {
   color: #fff;
-  white-space: nowrap;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
 }
 
-/* Iniciar sesión */
-
-.auth-login {
+.auth-login,
+.auth-logout,
+.auth-panel {
   display: inline-flex;
   align-items: center;
   justify-content: center;
 
-  padding: 0.5rem 1rem;
+  min-height: 38px;
+  max-width: 100%;
+
+  padding: 0.45rem 0.7rem;
 
   border: 1.5px solid var(--color-gold);
   border-radius: 999px;
-
-  color: var(--color-gold);
-  background: transparent;
-
-  font-size: 0.9rem;
-  font-weight: 600;
-  text-decoration: none;
-
-  white-space: nowrap;
-
-  transition:
-    background-color 0.2s ease,
-    color 0.2s ease;
-}
-
-.auth-login:hover {
-  background-color: var(--color-gold);
-  color: var(--color-purple);
-}
-
-/* Cerrar sesión */
-
-.auth-logout {
-  padding: 0.5rem 1rem;
-
-  border: 1.5px solid var(--color-gold);
-  border-radius: 999px;
-
-  background: transparent;
-  color: var(--color-gold);
 
   font-family: inherit;
-  font-size: 0.9rem;
+  font-size: 0.75rem;
   font-weight: 600;
+  text-decoration: none;
+  text-align: center;
 
-  cursor: pointer;
+  overflow-wrap: anywhere;
 
   transition:
     background-color 0.2s ease,
     color 0.2s ease;
 }
 
-.auth-logout:hover {
-  background-color: var(--color-gold);
-  color: var(--color-purple);
+.auth-login,
+.auth-logout {
+  background: transparent;
+  color: #fff;
 }
 
-/* Panel de administración (solo visible para admins) */
+.auth-logout {
+  cursor: pointer;
+}
+
+.auth-login:hover,
+.auth-logout:hover {
+  background-color: var(--color-gold);
+  color: var(--color-text);
+}
 
 .auth-panel {
-  padding: 0.5rem 1rem;
-
-  border-radius: 999px;
-
   background: var(--color-gold);
-  color: var(--color-purple);
-
-  font-size: 0.9rem;
+  color: var(--color-text);
   font-weight: 700;
-  text-decoration: none;
-
-  white-space: nowrap;
 }
 
 .auth-panel:hover {
   background: #fff;
+}
+
+.auth-login:focus-visible,
+.auth-logout:focus-visible,
+.auth-panel:focus-visible {
+  outline: 2px solid white;
+  outline-offset: 3px;
+}
+
+@media (min-width: 360px) {
+  .auth-status {
+    gap: 8px;
+  }
+}
+
+@media (min-width: 768px) {
+  .auth-status {
+    gap: 0.8rem;
+  }
+
+  .auth-user {
+    font-size: 0.9rem;
+  }
+
+  .auth-login,
+  .auth-logout,
+  .auth-panel {
+    font-size: 0.85rem;
+    padding: 0.5rem 0.85rem;
+  }
+}
+
+@media (min-width: 1200px) {
+  .auth-user {
+    font-size: 1rem;
+  }
+
+  .auth-login,
+  .auth-logout,
+  .auth-panel {
+    font-size: 0.9rem;
+    padding: 0.5rem 1rem;
+  }
 }

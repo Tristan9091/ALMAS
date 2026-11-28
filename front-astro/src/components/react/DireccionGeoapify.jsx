@@ -1,16 +1,21 @@
 import { useEffect, useRef, useState } from "react";
+import { traducir } from "../../i18n/utils";
 
 const API_KEY = import.meta.env.PUBLIC_GEOAPIFY_API_KEY;
 
-export default function DireccionGeoapify({ value, onChange }) {
+export default function DireccionGeoapify({ value, onChange, idioma = "es" }) {
   const [sugerencias, setSugerencias] = useState([]);
   const [buscando, setBuscando] = useState(false);
+
   const [mostrarSugerencias, setMostrarSugerencias] = useState(false);
+
   const [error, setError] = useState("");
 
   const contenedorRef = useRef(null);
   const solicitudRef = useRef(0);
   const seleccionRef = useRef(false);
+
+  const t = (es, en) => traducir(idioma, es, en);
 
   useEffect(() => {
     const cerrar = (event) => {
@@ -30,7 +35,11 @@ export default function DireccionGeoapify({ value, onChange }) {
   }, []);
 
   useEffect(() => {
-    if (!mostrarSugerencias || seleccionRef.current) return;
+    const textoTraducido = (es, en) => traducir(idioma, es, en);
+
+    if (!mostrarSugerencias || seleccionRef.current) {
+      return;
+    }
 
     const texto = value.trim();
 
@@ -43,13 +52,18 @@ export default function DireccionGeoapify({ value, onChange }) {
 
     if (!API_KEY) {
       setError(
-        "Autocompletado no disponible. Escribe tu direccion manualmente.",
+        textoTraducido(
+          "Autocompletado no disponible. Escribe tu dirección manualmente.",
+          "Autocomplete is unavailable. Enter your address manually.",
+        ),
       );
+
       setBuscando(false);
       return;
     }
 
     const controlador = new AbortController();
+
     const solicitudActual = ++solicitudRef.current;
 
     const temporizador = setTimeout(async () => {
@@ -60,7 +74,7 @@ export default function DireccionGeoapify({ value, onChange }) {
         const parametros = new URLSearchParams({
           text: texto,
           filter: "countrycode:mx",
-          lang: "es",
+          lang: idioma,
           limit: "5",
           format: "json",
           apiKey: API_KEY,
@@ -68,7 +82,9 @@ export default function DireccionGeoapify({ value, onChange }) {
 
         const respuesta = await fetch(
           `https://api.geoapify.com/v1/geocode/autocomplete?${parametros}`,
-          { signal: controlador.signal },
+          {
+            signal: controlador.signal,
+          },
         );
 
         if (!respuesta.ok) {
@@ -77,15 +93,26 @@ export default function DireccionGeoapify({ value, onChange }) {
 
         const datos = await respuesta.json();
 
-        if (solicitudActual !== solicitudRef.current) return;
+        if (solicitudActual !== solicitudRef.current) {
+          return;
+        }
 
         setSugerencias(datos.results || []);
       } catch (err) {
-        if (err.name === "AbortError") return;
+        if (
+          err.name === "AbortError" ||
+          solicitudActual !== solicitudRef.current
+        ) {
+          return;
+        }
 
         setSugerencias([]);
+
         setError(
-          "No se encontraron sugerencias. Puedes escribir tu direccion.",
+          textoTraducido(
+            "No se encontraron sugerencias. Puedes escribir tu dirección.",
+            "No suggestions were found. You can enter your address manually.",
+          ),
         );
       } finally {
         if (solicitudActual === solicitudRef.current) {
@@ -98,11 +125,13 @@ export default function DireccionGeoapify({ value, onChange }) {
       clearTimeout(temporizador);
       controlador.abort();
     };
-  }, [value, mostrarSugerencias]);
+  }, [value, mostrarSugerencias, idioma]);
 
   const cambiarDireccion = (event) => {
     seleccionRef.current = false;
+
     onChange(event.target.value);
+
     setMostrarSugerencias(true);
     setSugerencias([]);
   };
@@ -112,14 +141,18 @@ export default function DireccionGeoapify({ value, onChange }) {
     solicitudRef.current += 1;
 
     onChange(opcion.formatted || "");
+
     setSugerencias([]);
     setMostrarSugerencias(false);
+    setBuscando(false);
     setError("");
   };
 
   return (
     <div className="geoapify-direccion" ref={contenedorRef}>
-      <label htmlFor="direccion-envio">Direccion de envio</label>
+      <label htmlFor="direccion-envio">
+        {t("Dirección de envío", "Shipping address")}
+      </label>
 
       <textarea
         id="direccion-envio"
@@ -130,7 +163,10 @@ export default function DireccionGeoapify({ value, onChange }) {
             setMostrarSugerencias(true);
           }
         }}
-        placeholder="Escribe tu calle, numero, colonia y ciudad"
+        placeholder={t(
+          "Escribe tu calle, número, colonia y ciudad",
+          "Enter your street, number, neighborhood and city",
+        )}
         autoComplete="street-address"
         required
         rows={3}
@@ -139,7 +175,9 @@ export default function DireccionGeoapify({ value, onChange }) {
       {mostrarSugerencias && (
         <>
           {buscando && (
-            <p className="geoapify-estado">Buscando direcciones...</p>
+            <p className="geoapify-estado" role="status">
+              {t("Buscando direcciones...", "Searching for addresses...")}
+            </p>
           )}
 
           {sugerencias.length > 0 && (
@@ -151,7 +189,9 @@ export default function DireccionGeoapify({ value, onChange }) {
                     className="geoapify-opcion"
                     onClick={() => seleccionarDireccion(opcion)}
                   >
-                    <span className="geoapify-opcion-icono">⌖</span>
+                    <span className="geoapify-opcion-icono" aria-hidden="true">
+                      ⌖
+                    </span>
 
                     <span className="geoapify-opcion-contenido">
                       <strong>
@@ -174,8 +214,11 @@ export default function DireccionGeoapify({ value, onChange }) {
 
                       <small>
                         {opcion.postcode
-                          ? `C.P. ${opcion.postcode} · México`
-                          : "México"}
+                          ? t(
+                              `C.P. ${opcion.postcode} · México`,
+                              `ZIP ${opcion.postcode} · Mexico`,
+                            )
+                          : t("México", "Mexico")}
                       </small>
                     </span>
                   </button>
@@ -184,12 +227,19 @@ export default function DireccionGeoapify({ value, onChange }) {
             </ul>
           )}
 
-          {error && <p className="geoapify-estado">{error}</p>}
+          {error && (
+            <p className="geoapify-estado" role="status">
+              {error}
+            </p>
+          )}
         </>
       )}
 
       <p className="geoapify-ayuda">
-        Selecciona una sugerencia o escribe tu direccion completa manualmente.
+        {t(
+          "Selecciona una sugerencia o escribe tu dirección completa manualmente.",
+          "Select a suggestion or enter your full address manually.",
+        )}
       </p>
     </div>
   );

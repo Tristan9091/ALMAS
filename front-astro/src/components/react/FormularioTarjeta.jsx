@@ -1,20 +1,26 @@
 import { useEffect, useRef, useState } from "react";
+import { traducir } from "../../i18n/utils";
 
 const SDK_URL = "https://sdk.mercadopago.com/js/v2";
 const CONTENEDOR = "cardPaymentBrick_container";
 
-// La Public Key es pública: puede ir en el navegador sin riesgo.
-// Se configura en front-astro/.env como PUBLIC_MP_PUBLIC_KEY.
 const PUBLIC_KEY = import.meta.env.PUBLIC_MP_PUBLIC_KEY;
 
-/** Carga el SDK de Mercado Pago una sola vez. */
+// Carga el SDK de Mercado Pago una sola vez.
 function cargarSdk() {
   if (window.MercadoPago) return Promise.resolve();
+
   return new Promise((resolve, reject) => {
     const existente = document.querySelector(`script[src="${SDK_URL}"]`);
+
     const script = existente ?? document.createElement("script");
+
     script.addEventListener("load", () => resolve());
-    script.addEventListener("error", () => reject(new Error("No se pudo cargar Mercado Pago.")));
+
+    script.addEventListener("error", () =>
+      reject(new Error("No se pudo cargar Mercado Pago.")),
+    );
+
     if (!existente) {
       script.src = SDK_URL;
       document.head.appendChild(script);
@@ -22,28 +28,40 @@ function cargarSdk() {
   });
 }
 
-/**
- * Formulario de tarjeta de Mercado Pago (Card Payment Brick).
- *
- * El número de tarjeta se escribe en campos que controla Mercado Pago.
- * Al enviar, Mercado Pago entrega un "token" y este componente se lo pasa
- * a onPagar(). La tarjeta nunca pasa por el código de ALMĀS.
- *
- * onPagar debe regresar una Promise: el formulario muestra "procesando"
- * mientras espera.
- */
-export default function FormularioTarjeta({ monto, email, onPagar }) {
+export default function FormularioTarjeta({
+  monto,
+  email,
+  onPagar,
+  idioma = "es",
+}) {
   const controlador = useRef(null);
   const onPagarRef = useRef(onPagar);
+
   const [estado, setEstado] = useState("cargando");
   const [error, setError] = useState(null);
+
+  const t = (es, en) => traducir(idioma, es, en);
 
   onPagarRef.current = onPagar;
 
   useEffect(() => {
+    const texto = (es, en) => traducir(idioma, es, en);
+
+    setEstado("cargando");
+    setError(null);
+
     if (!PUBLIC_KEY) {
       setEstado("error");
-      setError("Falta configurar PUBLIC_MP_PUBLIC_KEY en front-astro/.env.");
+
+      setError(
+        texto(
+          "El servicio de pago no está configurado.",
+          "The payment service is not configured.",
+        ),
+      );
+
+      console.error("Falta configurar PUBLIC_MP_PUBLIC_KEY.");
+
       return;
     }
 
@@ -52,15 +70,22 @@ export default function FormularioTarjeta({ monto, email, onPagar }) {
     cargarSdk()
       .then(async () => {
         if (cancelado) return;
-        const mp = new window.MercadoPago(PUBLIC_KEY, { locale: "es-MX" });
-        controlador.current = await mp.bricks().create("cardPayment", CONTENEDOR, {
+
+        const mp = new window.MercadoPago(PUBLIC_KEY, {
+          locale: idioma === "en" ? "en-US" : "es-MX",
+        });
+
+        const brick = await mp.bricks().create("cardPayment", CONTENEDOR, {
           initialization: {
             amount: monto,
             payer: { email },
           },
+
           customization: {
-            // Pago en una sola exhibición (sin meses sin intereses).
-            paymentMethods: { maxInstallments: 1 },
+            paymentMethods: {
+              maxInstallments: 1,
+            },
+
             visual: {
               style: {
                 customVariables: {
@@ -70,10 +95,17 @@ export default function FormularioTarjeta({ monto, email, onPagar }) {
               },
             },
           },
+
           callbacks: {
-            onReady: () => !cancelado && setEstado("listo"),
+            onReady: () => {
+              if (!cancelado) {
+                setEstado("listo");
+              }
+            },
+
             onSubmit: (formData, additionalData) => {
               const metodo = formData.payment_method_id;
+
               const tipo =
                 additionalData?.paymentTypeId ??
                 formData.payment_type_id ??
@@ -87,30 +119,69 @@ export default function FormularioTarjeta({ monto, email, onPagar }) {
                 emailPagador: formData.payer?.email || email,
               });
             },
+
             onError: (err) => {
               console.error("Mercado Pago:", err);
-              if (!cancelado) setError("Hubo un problema con el formulario de pago. Recarga la página.");
+
+              if (!cancelado) {
+                setError(
+                  texto(
+                    "Hubo un problema con el formulario de pago. Recarga la página.",
+                    "There was a problem with the payment form. Reload the page.",
+                  ),
+                );
+              }
             },
           },
         });
+
+        if (cancelado) {
+          brick.unmount();
+          return;
+        }
+
+        controlador.current = brick;
       })
       .catch((err) => {
         if (cancelado) return;
+
+        console.error("Mercado Pago:", err);
+
         setEstado("error");
-        setError(err.message);
+
+        setError(
+          texto(
+            "No se pudo cargar el formulario de pago.",
+            "Could not load the payment form.",
+          ),
+        );
       });
 
     return () => {
       cancelado = true;
+
       controlador.current?.unmount();
       controlador.current = null;
     };
-  }, [monto, email]);
+  }, [monto, email, idioma]);
 
   return (
     <div className="formulario-tarjeta">
-      {estado === "cargando" && <p className="checkout-nota">Cargando formulario de pago seguro…</p>}
-      {error && <p className="error">{error}</p>}
+      {estado === "cargando" && (
+        <p className="checkout-nota" role="status">
+          {t(
+            "Cargando formulario de pago seguro…",
+            "Loading secure payment form…",
+          )}
+        </p>
+      )}
+
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+
       <div id={CONTENEDOR} />
     </div>
   );

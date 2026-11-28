@@ -2,6 +2,8 @@
 import asyncio
 import logging
 
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 
@@ -24,13 +26,20 @@ class MensajeHistorial(BaseModel):
     def validar_rol(cls, valor: str) -> str:
         if valor not in ("user", "assistant"):
             raise ValueError("Rol no permitido")
+
         return valor
 
 
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    mensaje: str = Field(min_length=1, max_length=2000)
+    mensaje: str = Field(
+        min_length=1,
+        max_length=2000
+    )
+
+    idioma: Literal["es", "en"] = "es"
+
     historial: list[MensajeHistorial] = Field(
         default_factory=list,
         max_length=10,
@@ -42,7 +51,9 @@ class ChatRequest(BaseModel):
         valor = valor.strip()
 
         if not valor:
-            raise ValueError("El mensaje no puede estar vacio")
+            raise ValueError(
+                "El mensaje no puede estar vacío"
+            )
 
         return valor
 
@@ -63,24 +74,39 @@ async def chat_ia(datos: ChatRequest, request: Request):
             responder_consulta(
                 mensaje=datos.mensaje,
                 historial=historial,
+                idioma=datos.idioma,
             ),
             timeout=60,
         )
 
-        return ChatResponse(respuesta=respuesta)
+        return ChatResponse(
+            respuesta=respuesta
+        )
 
     except asyncio.TimeoutError:
-        logger.warning("Tiempo agotado en el asistente IA")
+        logger.warning(
+            "Tiempo agotado en el asistente IA"
+        )
 
         raise HTTPException(
             status_code=504,
-            detail="El asistente tardo demasiado en responder.",
+            detail=(
+                "The assistant took too long to respond."
+                if datos.idioma == "en"
+                else "El asistente tardó demasiado en responder."
+            ),
         )
 
     except Exception:
-        logger.exception("Error interno del asistente IA")
+        logger.exception(
+            "Error interno del asistente IA"
+        )
 
         raise HTTPException(
             status_code=503,
-            detail="El asistente no esta disponible temporalmente.",
+            detail=(
+                "The assistant is temporarily unavailable."
+                if datos.idioma == "en"
+                else "El asistente no está disponible temporalmente."
+            ),
         )

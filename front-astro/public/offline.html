@@ -1,9 +1,16 @@
 <!doctype html>
+
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+
     <meta name="theme-color" content="#8f1268" />
+
     <title>Sin conexión | ALMĀS</title>
 
     <link rel="icon" href="/icons/icon-192.png" />
@@ -22,67 +29,102 @@
 
       body {
         margin: 0;
+
         min-height: 100vh;
+        min-height: 100dvh;
+
         display: flex;
         align-items: center;
         justify-content: center;
+
         background: var(--color-bg);
         color: var(--color-text);
-        font-family: Arial, sans-serif;
-        padding: 24px;
+
+        font-family: system-ui, sans-serif;
+
+        padding-top: calc(16px + env(safe-area-inset-top, 0px));
+
+        padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+
+        padding-left: calc(16px + env(safe-area-inset-left, 0px));
+
+        padding-right: calc(16px + env(safe-area-inset-right, 0px));
       }
 
       main {
-        max-width: 440px;
         width: 100%;
+        min-width: 0;
+        max-width: 440px;
+
         text-align: center;
+        overflow-wrap: anywhere;
       }
 
       .logo {
-        width: 100px;
-        height: 100px;
+        width: 80px;
+        height: 80px;
+
         border-radius: 20px;
-        margin-bottom: 24px;
+
+        margin-bottom: 16px;
       }
 
       h1 {
         color: var(--color-purple);
-        font-size: 28px;
+
+        font-size: 24px;
+
         margin: 0 0 16px;
       }
 
       p {
-        font-size: 16px;
+        font-size: 15px;
         line-height: 1.6;
+
         margin-bottom: 24px;
       }
 
       .acciones {
         display: flex;
         flex-direction: column;
+
         gap: 12px;
       }
 
       button,
       a {
-        display: block;
+        display: inline-flex;
+        justify-content: center;
+        align-items: center;
+
+        min-height: 44px;
+        width: 100%;
+
         padding: 14px 20px;
+
         border-radius: 8px;
+
+        font: inherit;
         font-size: 15px;
         font-weight: bold;
+
+        text-align: center;
         text-decoration: none;
+
         cursor: pointer;
       }
 
       button {
         background: var(--color-purple);
         color: white;
+
         border: 1px solid var(--color-purple);
       }
 
       a {
         background: white;
         color: var(--color-purple);
+
         border: 1px solid var(--color-gold);
       }
 
@@ -94,29 +136,141 @@
 
       .nota {
         font-size: 13px;
+
         margin-top: 24px;
+        margin-bottom: 0;
+      }
+
+      @media (min-width: 360px) {
+        .logo {
+          width: 90px;
+          height: 90px;
+        }
+
+        h1 {
+          font-size: 26px;
+        }
+      }
+
+      @media (min-width: 768px) {
+        .logo {
+          width: 100px;
+          height: 100px;
+
+          margin-bottom: 24px;
+        }
+
+        h1 {
+          font-size: 28px;
+        }
+
+        p {
+          font-size: 16px;
+        }
+      }
+
+      @media (min-width: 1200px) {
+        main {
+          max-width: 480px;
+        }
+
+        h1 {
+          font-size: 32px;
+        }
+      }
+
+      @media (orientation: landscape) and (max-height: 500px) {
+        main {
+          max-width: 600px;
+        }
+
+        .logo {
+          width: 56px;
+          height: 56px;
+
+          margin-bottom: 8px;
+        }
+
+        h1 {
+          font-size: 22px;
+          margin-bottom: 8px;
+        }
+
+        p {
+          margin: 8px 0 16px;
+          font-size: 14px;
+        }
+
+        .acciones {
+          flex-direction: row;
+          flex-wrap: wrap;
+        }
+
+        .acciones > * {
+          flex: 1 1 180px;
+        }
+
+        .nota {
+          margin-top: 12px;
+        }
       }
     </style>
   </head>
 
   <body>
     <main>
-      <img class="logo" src="/icons/icon-192.png" alt="ALMĀS Joyería" />
+      <img class="logo" src="/icons/icon-192.png" alt="ALMĀS" />
 
-      <h1>Estás sin conexión</h1>
+      <h1 id="titulo">Estás sin conexión</h1>
 
-      <p>
+      <p id="descripcion">
         Esta página todavía no está disponible sin internet. Puedes volver al
         catálogo y consultar los productos que hayas visitado anteriormente.
       </p>
 
       <div class="acciones">
-        <button onclick="window.location.reload()">Reintentar conexión</button>
+        <button
+          id="reintentar"
+          type="button"
+          onclick="window.location.reload()"
+        >
+          Reintentar conexión
+        </button>
 
-        <a href="/">Volver al catálogo</a>
+        <a id="catalogo" href="/"> Volver al catálogo </a>
       </div>
 
-      <p class="nota">Necesitas conexión a internet para realizar compras.</p>
+      <p class="nota" id="nota">
+        Necesitas conexión a internet para realizar compras.
+      </p>
     </main>
+
+    <script>
+      const idioma = /^\/en(?:\/|$)/.test(window.location.pathname)
+        ? "en"
+        : "es";
+
+      document.documentElement.lang = idioma;
+
+      if (idioma === "en") {
+        document.title = "Offline | ALMĀS";
+
+        document.getElementById("titulo").textContent = "You are offline";
+
+        document.getElementById("descripcion").textContent =
+          "This page is not available offline yet. " +
+          "You can return to the catalog and browse " +
+          "products you have previously visited.";
+
+        document.getElementById("reintentar").textContent = "Retry connection";
+
+        document.getElementById("catalogo").textContent = "Back to catalog";
+
+        document.getElementById("catalogo").href = "/en/";
+
+        document.getElementById("nota").textContent =
+          "You need an internet connection to make purchases.";
+      }
+    </script>
   </body>
 </html>

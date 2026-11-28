@@ -1,6 +1,23 @@
+.auth-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 100%;
+  min-width: 0;
+
+  min-height: 75vh;
+  min-height: 75dvh;
+
+  padding: 24px var(--page-padding);
+}
+
 .auth-form {
   width: 100%;
-  padding: 2.5rem;
+  max-width: 450px;
+  min-width: 0;
+
+  padding: 1.25rem;
 
   background: #fff;
   border: 1px solid rgba(0, 0, 0, 0.08);
@@ -13,17 +30,21 @@
   margin: 0 0 0.5rem;
 
   font-family: var(--font-heading);
-  font-size: 2rem;
+  font-size: 1.5rem;
   text-align: center;
 
   color: var(--color-purple);
+
+  overflow-wrap: anywhere;
 }
 
 .auth-subtitle {
-  margin: 0 0 2rem;
+  margin: 0 0 1.5rem;
 
   text-align: center;
   color: #666;
+  font-size: 0.9rem;
+  line-height: 1.5;
 }
 
 .auth-form label {
@@ -39,6 +60,9 @@
 
 .auth-form input {
   width: 100%;
+  min-width: 0;
+  min-height: 44px;
+
   box-sizing: border-box;
 
   padding: 0.8rem 1rem;
@@ -61,6 +85,7 @@
 
 .auth-form button {
   width: 100%;
+  min-height: 44px;
 
   padding: 0.85rem 1rem;
   margin-top: 0.5rem;
@@ -93,9 +118,12 @@
 
 .auth-link {
   margin-top: 1.5rem;
+  margin-bottom: 0;
 
   text-align: center;
   color: #666;
+  font-size: 0.9rem;
+  line-height: 1.5;
 }
 
 .auth-link a {
@@ -117,4 +145,79 @@
   color: #a00;
 
   font-size: 0.9rem;
+  line-height: 1.5;
+
+  overflow-wrap: anywhere;
+}
+
+.auth-form button:focus-visible,
+.auth-form a:focus-visible {
+  outline: 3px solid var(--color-purple);
+  outline-offset: 3px;
+}
+
+/* Teléfonos */
+
+@media (min-width: 360px) {
+  .auth-form {
+    padding: 1.5rem;
+  }
+
+  .auth-form h1 {
+    font-size: 1.7rem;
+  }
+}
+
+/* Tabletas */
+
+@media (min-width: 768px) {
+  .auth-page {
+    padding-block: 48px;
+  }
+
+  .auth-form {
+    padding: 2rem;
+  }
+
+  .auth-form h1 {
+    font-size: 2rem;
+  }
+
+  .auth-subtitle,
+  .auth-link {
+    font-size: 1rem;
+  }
+}
+
+/* Escritorio */
+
+@media (min-width: 1200px) {
+  .auth-page {
+    padding-block: 64px;
+  }
+
+  .auth-form {
+    padding: 2.5rem;
+  }
+}
+
+/* Orientación horizontal */
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .auth-page {
+    min-height: auto;
+    padding-block: 16px;
+  }
+
+  .auth-form {
+    padding: 1.25rem;
+  }
+
+  .auth-form h1 {
+    font-size: 1.5rem;
+  }
+
+  .auth-subtitle {
+    margin-bottom: 1rem;
+  }
 }

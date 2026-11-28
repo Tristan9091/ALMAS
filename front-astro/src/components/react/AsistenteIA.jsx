@@ -2,11 +2,14 @@ import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { traducir, rutaLocalizada } from "../../i18n/utils";
+
 const GRAPHQL_URL =
   import.meta.env.PUBLIC_GRAPHQL_URL || "http://127.0.0.1:8000/graphql";
+
 const API_URL = GRAPHQL_URL.replace(/\/graphql\/?$/, "");
 
-function RespuestaMarkdown({ contenido }) {
+function RespuestaMarkdown({ contenido, idioma }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -20,12 +23,11 @@ function RespuestaMarkdown({ contenido }) {
           try {
             const url = new URL(href, window.location.origin);
 
-            // Solo permitir enlaces internos a productos de ALMĀS.
             if (
               url.origin === window.location.origin &&
-              /^\/producto\/\d+\/?$/.test(url.pathname)
+              /^(\/en)?\/producto\/\d+\/?$/.test(url.pathname)
             ) {
-              destino = url.pathname;
+              destino = rutaLocalizada(url.pathname, idioma);
             }
           } catch {
             return <span>{children}</span>;
@@ -46,15 +48,21 @@ function RespuestaMarkdown({ contenido }) {
   );
 }
 
-export default function AsistenteIA() {
+export default function AsistenteIA({ idioma = "es" }) {
+  const t = (es, en) => traducir(idioma, es, en);
+
   const MENSAJE_INICIAL = {
     role: "assistant",
-    content:
+    content: t(
       "¡Hola! Soy el asistente de ALMĀS. 💎 ¿Buscas una joya para ti o para regalar?",
+      "Hello! I'm the ALMĀS assistant. 💎 Are you looking for jewelry for yourself or as a gift?",
+    ),
   };
 
   const [abierto, setAbierto] = useState(false);
+
   const [mensajes, setMensajes] = useState([MENSAJE_INICIAL]);
+
   const [restaurado, setRestaurado] = useState(false);
   const [texto, setTexto] = useState("");
   const [cargando, setCargando] = useState(false);
@@ -65,6 +73,7 @@ export default function AsistenteIA() {
   useEffect(() => {
     try {
       const guardados = sessionStorage.getItem("almas_chat_mensajes");
+
       const estadoAbierto = sessionStorage.getItem("almas_chat_abierto");
 
       if (guardados) {
@@ -72,13 +81,28 @@ export default function AsistenteIA() {
 
         if (
           Array.isArray(datos) &&
+          datos.length > 0 &&
           datos.every(
             (m) =>
               (m.role === "user" || m.role === "assistant") &&
               typeof m.content === "string",
           )
         ) {
-          setMensajes(datos.slice(-50));
+          const historial = datos.slice(-50);
+
+          const saludos = [
+            "¡Hola! Soy el asistente de ALMĀS. 💎 ¿Buscas una joya para ti o para regalar?",
+            "Hello! I'm the ALMĀS assistant. 💎 Are you looking for jewelry for yourself or as a gift?",
+          ];
+
+          if (
+            historial[0]?.role === "assistant" &&
+            saludos.includes(historial[0].content)
+          ) {
+            historial[0] = MENSAJE_INICIAL;
+          }
+
+          setMensajes(historial);
         }
       }
 
@@ -98,6 +122,7 @@ export default function AsistenteIA() {
         "almas_chat_mensajes",
         JSON.stringify(mensajes.slice(-50)),
       );
+
       sessionStorage.setItem("almas_chat_abierto", String(abierto));
     } catch (error) {
       console.error("No se pudo guardar el chat:", error);
@@ -106,7 +131,10 @@ export default function AsistenteIA() {
 
   useEffect(() => {
     if (abierto) {
-      finalRef.current?.scrollIntoView({ behavior: "smooth" });
+      finalRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "end",
+      });
     }
   }, [mensajes, abierto, cargando]);
 
@@ -115,29 +143,43 @@ export default function AsistenteIA() {
 
     const mensaje = texto.trim();
 
-    if (!mensaje || enviandoRef.current || mensaje.length > 2000) return;
+    if (!mensaje || enviandoRef.current || mensaje.length > 2000) {
+      return;
+    }
 
     enviandoRef.current = true;
+
     setCargando(true);
     setTexto("");
 
     const historial = mensajes
       .filter((m) => !m.error)
       .slice(-10)
-      .map(({ role, content }) => ({ role, content }));
+      .map(({ role, content }) => ({
+        role,
+        content: content.slice(0, 2000),
+      }));
 
     setMensajes((actuales) => [
       ...actuales,
-      { role: "user", content: mensaje },
+      {
+        role: "user",
+        content: mensaje,
+      },
     ]);
 
     try {
       const respuesta = await fetch(`${API_URL}/api/ai/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+
+        headers: {
+          "Content-Type": "application/json",
+        },
+
         body: JSON.stringify({
           mensaje,
           historial,
+          idioma,
         }),
       });
 
@@ -153,7 +195,10 @@ export default function AsistenteIA() {
 
       setMensajes((actuales) => [
         ...actuales,
-        { role: "assistant", content: datos.respuesta },
+        {
+          role: "assistant",
+          content: datos.respuesta,
+        },
       ]);
     } catch (error) {
       console.error("Error del asistente:", error);
@@ -162,8 +207,12 @@ export default function AsistenteIA() {
         ...actuales,
         {
           role: "assistant",
-          content:
+
+          content: t(
             "Lo siento, no pude responder en este momento. Inténtalo nuevamente.",
+            "Sorry, I couldn't respond right now. Please try again.",
+          ),
+
           error: true,
         },
       ]);
@@ -174,19 +223,28 @@ export default function AsistenteIA() {
   }
 
   if (!restaurado) return null;
+
   return (
     <div className="almas-chat">
       {abierto && (
         <section
+          id="almas-chat-ventana"
           className="almas-chat-ventana"
-          aria-label="Asistente de compras ALMĀS"
+          aria-label={t(
+            "Asistente de compras ALMĀS",
+            "ALMĀS shopping assistant",
+          )}
         >
           <header className="almas-chat-header">
             <div className="almas-chat-identidad">
-              <span className="almas-chat-logo">✦</span>
+              <span className="almas-chat-logo" aria-hidden="true">
+                ✦
+              </span>
+
               <div>
                 <strong>ALMĀS</strong>
-                <small>Asistente de compras</small>
+
+                <small>{t("Asistente de compras", "Shopping assistant")}</small>
               </div>
             </div>
 
@@ -194,13 +252,13 @@ export default function AsistenteIA() {
               type="button"
               className="almas-chat-minimizar"
               onClick={() => setAbierto(false)}
-              aria-label="Minimizar asistente"
+              aria-label={t("Minimizar asistente", "Minimize assistant")}
             >
               −
             </button>
           </header>
 
-          <div className="almas-chat-mensajes" aria-live="polite">
+          <div className="almas-chat-mensajes" role="log" aria-live="polite">
             {mensajes.map((mensaje, index) => (
               <div
                 key={index}
@@ -209,7 +267,10 @@ export default function AsistenteIA() {
                 }`}
               >
                 {mensaje.role === "assistant" ? (
-                  <RespuestaMarkdown contenido={mensaje.content} />
+                  <RespuestaMarkdown
+                    contenido={mensaje.content}
+                    idioma={idioma}
+                  />
                 ) : (
                   mensaje.content
                 )}
@@ -217,7 +278,9 @@ export default function AsistenteIA() {
             ))}
 
             {cargando && (
-              <div className="almas-chat-mensaje asistente">Escribiendo...</div>
+              <div className="almas-chat-mensaje asistente">
+                {t("Escribiendo...", "Typing...")}
+              </div>
             )}
 
             <div ref={finalRef} />
@@ -228,8 +291,14 @@ export default function AsistenteIA() {
               type="text"
               value={texto}
               onChange={(e) => setTexto(e.target.value)}
-              placeholder="Pregúntame sobre nuestras joyas..."
-              aria-label="Mensaje para el asistente"
+              placeholder={t(
+                "Pregúntame sobre nuestras joyas...",
+                "Ask me about our jewelry...",
+              )}
+              aria-label={t(
+                "Mensaje para el asistente",
+                "Message for the assistant",
+              )}
               maxLength={2000}
               disabled={cargando}
             />
@@ -237,13 +306,15 @@ export default function AsistenteIA() {
             <button
               type="submit"
               disabled={cargando || !texto.trim()}
-              aria-label="Enviar mensaje"
+              aria-label={t("Enviar mensaje", "Send message")}
             >
               ➤
             </button>
           </form>
 
-          <div className="almas-chat-pie">Asistente virtual de ALMĀS</div>
+          <div className="almas-chat-pie">
+            {t("Asistente virtual de ALMĀS", "ALMĀS virtual assistant")}
+          </div>
         </section>
       )}
 
@@ -251,315 +322,415 @@ export default function AsistenteIA() {
         type="button"
         className="almas-chat-boton"
         onClick={() => setAbierto((actual) => !actual)}
-        aria-label={abierto ? "Cerrar asistente" : "Abrir asistente"}
+        aria-label={
+          abierto
+            ? t("Cerrar asistente", "Close assistant")
+            : t("Abrir asistente", "Open assistant")
+        }
         aria-expanded={abierto}
+        aria-controls={abierto ? "almas-chat-ventana" : undefined}
       >
-        <span>{abierto ? "×" : "✦"}</span>
-        {!abierto && <span>¿Necesitas ayuda?</span>}
+        <span aria-hidden="true">{abierto ? "×" : "✦"}</span>
+
+        {!abierto && <span>{t("¿Necesitas ayuda?", "Need help?")}</span>}
       </button>
 
       <style>{`
-  /* Contenedor principal */
+        .almas-chat {
+          position: fixed;
 
-  .almas-chat {
-    position: fixed;
-    right: 24px;
-    bottom: 24px;
-    z-index: 9999;
-    font-family: inherit;
-  }
+          right: max(
+            12px,
+            calc(env(safe-area-inset-right, 0px) + 8px)
+          );
 
-  /* Boton flotante */
+          bottom: max(
+            12px,
+            calc(env(safe-area-inset-bottom, 0px) + 8px)
+          );
 
-  .almas-chat-boton {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 14px 20px;
-    border: 1px solid #d4af37;
-    border-radius: 40px;
-    background: #870d67;
-    color: #fff;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    box-shadow: 0 5px 22px #0003;
-    transition: transform 0.2s, background 0.2s;
-  }
+          z-index: 9999;
+          font-family: inherit;
+        }
 
-  .almas-chat-boton:hover {
-    transform: translateY(-2px);
-    background: #a4147e;
-  }
+        .almas-chat-boton {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
 
-  .almas-chat-boton span:first-child {
-    font-size: 22px;
-    line-height: 1;
-  }
+          min-height: 44px;
+          padding: 12px 16px;
 
-  /* Ventana desplegable */
+          border: 1px solid #d4af37;
+          border-radius: 40px;
 
-  .almas-chat-ventana {
-    position: absolute;
-    right: 0;
-    bottom: 68px;
-    width: 370px;
-    height: 490px;
-    max-height: calc(100dvh - 110px);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    border: 1px solid #e8d7a5;
-    border-radius: 16px;
-    background: #fff;
-    color: #24201e;
-    box-shadow: 0 10px 45px #0003;
-  }
+          background: #870d67;
+          color: #fff;
 
-  /* Encabezado */
+          font-size: 13px;
+          font-weight: 600;
 
-  .almas-chat-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 17px 20px;
-    background: #870d67;
-    color: #fff;
-    border-bottom: 2px solid #d4af37;
-  }
+          cursor: pointer;
+          box-shadow: 0 5px 22px #0003;
 
-  .almas-chat-identidad {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
+          transition:
+            transform 0.2s,
+            background 0.2s;
+        }
 
-  .almas-chat-logo {
-    display: grid;
-    place-items: center;
-    width: 39px;
-    height: 39px;
-    border: 1px solid #d4af37;
-    border-radius: 50%;
-    color: #d4af37;
-    font-size: 22px;
-  }
+        .almas-chat-boton:hover {
+          transform: translateY(-2px);
+          background: #a4147e;
+        }
 
-  .almas-chat-identidad strong {
-    display: block;
-    font-size: 16px;
-    letter-spacing: 2px;
-  }
+        .almas-chat-boton span:first-child {
+          font-size: 22px;
+          line-height: 1;
+        }
 
-  .almas-chat-identidad small {
-    display: block;
-    margin-top: 3px;
-    color: #f0d9e9;
-    font-size: 11px;
-  }
+        .almas-chat-ventana {
+          position: absolute;
+          right: 0;
+          bottom: 60px;
 
-  .almas-chat-minimizar {
-    border: none;
-    background: transparent;
-    color: #fff;
-    font-size: 28px;
-    cursor: pointer;
-    transition: color 0.2s;
-  }
+          width: min(
+            370px,
+            calc(
+              100vw - 24px -
+              env(safe-area-inset-left, 0px) -
+              env(safe-area-inset-right, 0px)
+            )
+          );
 
-  .almas-chat-minimizar:hover {
-    color: #d4af37;
-  }
+          height: 490px;
 
-  /* Area de mensajes */
+          max-height: calc(
+            100dvh - 84px -
+            env(safe-area-inset-top, 0px) -
+            env(safe-area-inset-bottom, 0px)
+          );
 
-  .almas-chat-mensajes {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    padding: 18px;
-    overflow-y: auto;
-    background: #faf8f6;
-  }
+          display: flex;
+          flex-direction: column;
 
-  .almas-chat-mensaje {
-    max-width: 88%;
-    padding: 12px 14px;
-    border-radius: 13px;
-    font-size: 13px;
-    line-height: 1.6;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
+          overflow: hidden;
 
-  /* Mensajes del asistente */
+          border: 1px solid #e8d7a5;
+          border-radius: 16px;
 
-  .almas-chat-mensaje.asistente {
-    align-self: flex-start;
-    background: #fff;
-    color: #24201e;
-    border: 1px solid #e9e4df;
-    border-bottom-left-radius: 4px;
-  }
+          background: #fff;
+          color: #24201e;
 
-  /* Mensajes del usuario */
+          box-shadow: 0 10px 45px #0003;
+        }
 
-  .almas-chat-mensaje.usuario {
-    align-self: flex-end;
-    background: #870d67;
-    color: #fff;
-    border-bottom-right-radius: 4px;
-  }
+        .almas-chat-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          flex-shrink: 0;
 
-  /* Formulario */
+          padding: 12px 14px;
 
-  .almas-chat-formulario {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px;
-    border-top: 1px solid #eee;
-    background: #fff;
-  }
+          background: #870d67;
+          color: #fff;
 
-  .almas-chat-formulario input {
-    flex: 1;
-    min-width: 0;
-    padding: 11px 12px;
-    border: 1px solid #e5dfda;
-    border-radius: 9px;
-    outline: none;
-    background: #fff;
-    color: #24201e;
-    font-size: 12px;
-    transition: border-color 0.2s;
-  }
+          border-bottom: 2px solid #d4af37;
+        }
 
-  .almas-chat-formulario input:focus {
-    border-color: #d4af37;
-  }
+        .almas-chat-identidad {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          min-width: 0;
+        }
 
-  .almas-chat-formulario input:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
+        .almas-chat-logo {
+          display: grid;
+          place-items: center;
 
-  .almas-chat-formulario button {
-    width: 39px;
-    height: 39px;
-    flex-shrink: 0;
-    border: none;
-    border-radius: 9px;
-    background: #870d67;
-    color: #fff;
-    font-size: 18px;
-    cursor: pointer;
-    transition: background 0.2s;
-  }
+          width: 36px;
+          height: 36px;
+          flex-shrink: 0;
 
-  .almas-chat-formulario button:hover:not(:disabled) {
-    background: #a4147e;
-  }
+          border: 1px solid #d4af37;
+          border-radius: 50%;
 
-  .almas-chat-formulario button:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
+          color: #d4af37;
+          font-size: 22px;
+        }
 
-  /* Pie del chat */
+        .almas-chat-identidad strong {
+          display: block;
+          font-size: 16px;
+          letter-spacing: 2px;
+        }
 
-  .almas-chat-pie {
-    padding: 0 12px 10px;
-    text-align: center;
-    font-size: 10px;
-    color: #999;
-    background: #fff;
-  }
+        .almas-chat-identidad small {
+          display: block;
+          margin-top: 3px;
+          color: #f0d9e9;
+          font-size: 11px;
+        }
 
-  /* Markdown */
+        .almas-chat-minimizar {
+          min-width: 44px;
+          min-height: 44px;
 
-  .almas-chat-mensaje p {
-    margin: 0 0 10px;
-  }
+          border: none;
+          background: transparent;
+          color: #fff;
 
-  .almas-chat-mensaje p:last-child {
-    margin-bottom: 0;
-  }
+          font-size: 28px;
+          cursor: pointer;
+        }
 
-  .almas-chat-mensaje ul,
-  .almas-chat-mensaje ol {
-    margin: 8px 0;
-    padding-left: 20px;
-  }
+        .almas-chat-mensajes {
+          flex: 1;
+          min-height: 0;
 
-  .almas-chat-mensaje li {
-    margin-bottom: 6px;
-  }
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
 
-  .almas-chat-mensaje strong {
-    font-weight: 700;
-  }
+          padding: 12px;
 
-  /* Enlaces a productos */
+          overflow-y: auto;
+          overscroll-behavior: contain;
 
-  .almas-chat-mensaje .almas-chat-enlace {
-    color: #870d67;
-    text-decoration: underline;
-    font-weight: 600;
-    transition: color 0.2s;
-  }
+          background: #faf8f6;
+        }
 
-  .almas-chat-mensaje .almas-chat-enlace:hover {
-    color: #b38b20;
-  }
+        .almas-chat-mensaje {
+          max-width: 92%;
 
-  /* Tablas Markdown */
+          padding: 12px 14px;
+          border-radius: 13px;
 
-  .almas-chat-mensaje table {
-    display: block;
-    width: 100%;
-    max-width: 100%;
-    overflow-x: auto;
-    border-collapse: collapse;
-    margin: 10px 0;
-    font-size: 11px;
-  }
+          font-size: 13px;
+          line-height: 1.6;
 
-  .almas-chat-mensaje th,
-  .almas-chat-mensaje td {
-    padding: 7px;
-    border: 1px solid #e5dfda;
-    text-align: left;
-  }
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
+        }
 
-  .almas-chat-mensaje th {
-    background: #f5eff3;
-    color: #870d67;
-  }
+        .almas-chat-mensaje.asistente {
+          align-self: flex-start;
 
-  .almas-chat-mensaje code {
-    overflow-wrap: anywhere;
-  }
+          background: #fff;
+          color: #24201e;
 
-  /* Adaptacion a celulares */
+          border: 1px solid #e9e4df;
+          border-bottom-left-radius: 4px;
+        }
 
-  @media (max-width: 480px) {
-    .almas-chat {
-      right: 12px;
-      bottom: 12px;
-    }
+        .almas-chat-mensaje.usuario {
+          align-self: flex-end;
 
-    .almas-chat-ventana {
-      width: calc(100vw - 24px);
-      height: min(540px, calc(100dvh - 100px));
-    }
+          background: #870d67;
+          color: #fff;
 
-    .almas-chat-boton {
-      padding: 13px 16px;
-    }
-  }
-`}</style>
+          border-bottom-right-radius: 4px;
+        }
+
+        .almas-chat-formulario {
+          display: flex;
+          align-items: center;
+          flex-shrink: 0;
+
+          gap: 8px;
+          padding: 10px;
+
+          border-top: 1px solid #eee;
+          background: #fff;
+        }
+
+        .almas-chat-formulario input {
+          flex: 1;
+          min-width: 0;
+          min-height: 44px;
+
+          padding: 10px;
+
+          border: 1px solid #e5dfda;
+          border-radius: 9px;
+
+          background: #fff;
+          color: #24201e;
+
+          font-size: 16px;
+        }
+
+        .almas-chat-formulario input::placeholder {
+          color: #777;
+        }
+
+        .almas-chat-formulario input:focus {
+          outline: 2px solid #d4af37;
+        }
+
+        .almas-chat-formulario button {
+          width: 44px;
+          height: 44px;
+          flex-shrink: 0;
+
+          border: none;
+          border-radius: 9px;
+
+          background: #870d67;
+          color: #fff;
+
+          font-size: 18px;
+          cursor: pointer;
+        }
+
+        .almas-chat-formulario button:disabled,
+        .almas-chat-formulario input:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        .almas-chat-pie {
+          padding: 0 12px 10px;
+          flex-shrink: 0;
+
+          text-align: center;
+          font-size: 10px;
+
+          color: #777;
+          background: #fff;
+        }
+
+        .almas-chat-mensaje p {
+          margin: 0 0 10px;
+        }
+
+        .almas-chat-mensaje p:last-child {
+          margin-bottom: 0;
+        }
+
+        .almas-chat-mensaje ul,
+        .almas-chat-mensaje ol {
+          margin: 8px 0;
+          padding-left: 20px;
+        }
+
+        .almas-chat-mensaje li {
+          margin-bottom: 6px;
+        }
+
+        .almas-chat-enlace {
+          color: #870d67;
+          text-decoration: underline;
+          font-weight: 600;
+        }
+
+        .almas-chat-mensaje table {
+          display: block;
+          width: 100%;
+          max-width: 100%;
+
+          overflow-x: auto;
+          border-collapse: collapse;
+
+          margin: 10px 0;
+          font-size: 11px;
+        }
+
+        .almas-chat-mensaje th,
+        .almas-chat-mensaje td {
+          padding: 7px;
+          border: 1px solid #e5dfda;
+          text-align: left;
+        }
+
+        .almas-chat-mensaje th {
+          background: #f5eff3;
+          color: #870d67;
+        }
+
+        .almas-chat-mensaje pre {
+          max-width: 100%;
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
+        }
+
+        .almas-chat button:focus-visible,
+        .almas-chat a:focus-visible {
+          outline: 2px solid #d4af37;
+          outline-offset: 3px;
+        }
+
+        @media (min-width: 360px) {
+          .almas-chat-mensajes {
+            padding: 16px;
+          }
+        }
+
+        @media (min-width: 768px) {
+          .almas-chat {
+            right: calc(
+              24px + env(safe-area-inset-right, 0px)
+            );
+
+            bottom: calc(
+              24px + env(safe-area-inset-bottom, 0px)
+            );
+          }
+
+          .almas-chat-ventana {
+            bottom: 68px;
+            width: 370px;
+
+            max-height: calc(
+              100dvh - 110px -
+              env(safe-area-inset-top, 0px) -
+              env(safe-area-inset-bottom, 0px)
+            );
+          }
+
+          .almas-chat-header {
+            padding: 16px 20px;
+          }
+
+          .almas-chat-boton {
+            padding: 14px 20px;
+            font-size: 14px;
+          }
+        }
+
+        @media (min-width: 1200px) {
+          .almas-chat-ventana {
+            width: 400px;
+            height: 540px;
+          }
+        }
+
+        @media (orientation: landscape)
+          and (max-height: 500px) {
+
+          .almas-chat-ventana {
+            bottom: 52px;
+          }
+
+          .almas-chat-header {
+            padding: 4px 12px;
+          }
+
+          .almas-chat-mensajes {
+            padding: 8px;
+          }
+
+          .almas-chat-formulario {
+            padding: 6px;
+          }
+
+          .almas-chat-pie {
+            display: none;
+          }
+        }
+      `}</style>
     </div>
   );
 }

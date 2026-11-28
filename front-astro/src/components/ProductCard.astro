@@ -1,27 +1,39 @@
+
 ---
+import {
+    obtenerIdioma,
+    rutaLocalizada
+} from "../i18n/utils";
+
 interface Props {
-    id: number
-    nombre: string
-    precio: number
-    imagenUrl?: string | null
+    id: number;
+    nombre: string;
+    precio: number;
+    imagenUrl?: string | null;
 }
 
-const {
-    id,
-    nombre,
-    precio,
-    imagenUrl
-} = Astro.props
+const { id, nombre, precio, imagenUrl } = Astro.props;
+
+const idioma = obtenerIdioma(Astro.url.pathname);
+
+const precioFormateado = new Intl.NumberFormat(
+    idioma === "en" ? "en-US" : "es-MX",
+    {
+        style: "currency",
+        currency: "MXN",
+        currencyDisplay: "code"
+    }
+).format(precio);
 ---
 
 <a
     class="product-card"
-    href={`/producto/${id}`}
+    href={rutaLocalizada(`/producto/${id}`, idioma)}
 >
     <img
         src={
             imagenUrl ||
-            'https://placehold.co/400x400?text=ALMAS'
+            "https://placehold.co/400x400?text=ALMAS"
         }
         alt={nombre}
     />
@@ -29,15 +41,14 @@ const {
     <div class="product-info">
         <h3>{nombre}</h3>
 
-        <p>
-            ${precio.toLocaleString('es-MX')}
-        </p>
+        <p>{precioFormateado}</p>
     </div>
 </a>
 
 <style>
     .product-card {
         display: block;
+        min-width: 0;
 
         text-decoration: none;
         color: inherit;
@@ -65,16 +76,29 @@ const {
     }
 
     .product-info {
-        padding: 1rem;
+        padding: 0.75rem;
     }
 
     h3 {
         margin: 0 0 0.5rem;
+        font-size: 0.9rem;
+        overflow-wrap: anywhere;
     }
 
     p {
         margin: 0;
         color: var(--color-purple);
         font-weight: bold;
+        overflow-wrap: anywhere;
+    }
+
+    @media (min-width: 768px) {
+        .product-info {
+            padding: 1rem;
+        }
+
+        h3 {
+            font-size: 1.1rem;
+        }
     }
 </style>

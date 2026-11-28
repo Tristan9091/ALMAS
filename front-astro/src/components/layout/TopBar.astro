@@ -1,79 +1,138 @@
+
 ---
 import CartButton from "../react/CartButton.jsx";
 import SearchBar from "../react/SearchBar.jsx";
 import AuthStatus from "../react/AuthStatus.jsx";
 import InstallButton from "../react/InstallButton.jsx";
+import SelectorIdioma from "./SelectorIdioma.astro";
+
+import {
+    obtenerIdioma,
+    rutaLocalizada
+} from "../../i18n/utils";
+
+const idioma = obtenerIdioma(Astro.url.pathname);
 ---
 
 <header>
-    <a class="logo" href="/">
+
+    <a class="logo" href={rutaLocalizada("/", idioma)}>
         ALMĀS
     </a>
 
-    <SearchBar client:load />
+    <div class="buscador">
+        <SearchBar client:load idioma={idioma} />
+    </div>
 
     <div class="header-actions">
-        <InstallButton client:load /> <!-- línea nueva 2 -->
-        <AuthStatus client:load />
-        <CartButton client:load />
+
+        <SelectorIdioma />
+
+        <InstallButton client:load idioma={idioma} />
+
+        <AuthStatus client:load idioma={idioma} />
+
+        <CartButton client:load idioma={idioma} />
+
     </div>
+
 </header>
 
 <style>
     header {
         display: flex;
+        flex-wrap: wrap;
         justify-content: space-between;
         align-items: center;
 
-        padding: 1rem 2rem;
+        gap: 12px;
+        padding: 12px var(--page-padding);
 
         background-color: var(--color-purple);
         border-bottom: 2px solid var(--color-gold);
         box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
 
         position: sticky;
-        top: 0;
+        top: env(safe-area-inset-top, 0px);
         z-index: 10;
     }
 
     .logo {
         margin: 0;
+
         font-family: var(--font-heading);
-        font-size: 1.8rem;
+        font-size: 1.4rem;
         letter-spacing: 1px;
-        color: #fff;
-        text-decoration: none;
-    }
-
-    input {
-        flex: 0 1 320px;
-
-        padding: 0.5rem 1.2rem;
-        border-radius: 999px;
-
-        border: 1px solid rgba(253, 240, 220, 0.3);
-        background-color: rgba(253, 240, 220, 0.08);
 
         color: #fff;
+        text-decoration: none;
+        flex-shrink: 0;
     }
 
-    .cart {
-        display: flex;
-        align-items: center;
+    .buscador {
+        order: 3;
+        width: 100%;
+        min-width: 0;
+    }
 
-        border: 1.5px solid var(--color-gold);
-        color: var(--color-gold);
+    .buscador :global(form) {
+        width: 100%;
+        min-width: 0;
+    }
 
-        padding: 0.5rem;
-        border-radius: 999px;
-
-        font-size: 1.3rem;
-        text-decoration: none;
+    .buscador :global(input) {
+        min-width: 0;
+        max-width: 100%;
     }
 
     .header-actions {
         display: flex;
         align-items: center;
-        gap: 1rem;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+
+        gap: 8px;
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    @media (min-width: 360px) {
+        .logo {
+            font-size: 1.6rem;
+        }
+    }
+
+    @media (min-width: 768px) {
+        .buscador {
+            order: 0;
+            flex: 1 1 180px;
+            width: auto;
+            max-width: 420px;
+        }
+
+        .header-actions {
+            gap: 12px;
+        }
+    }
+
+    @media (min-width: 1200px) {
+        header {
+            padding: 1rem var(--page-padding);
+        }
+
+        .logo {
+            font-size: 1.8rem;
+        }
+
+        .header-actions {
+            gap: 16px;
+        }
+    }
+
+    @media (orientation: landscape) and (max-height: 500px) {
+        header {
+            position: relative;
+            top: 0;
+        }
     }
 </style>

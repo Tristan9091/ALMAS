@@ -1,32 +1,41 @@
 
 ---
-export const prerender = false
+export const prerender = false;
 
-import Layout from '../layouts/Layout.astro'
-import Hero from '../components/layout/Hero.astro'
-import Sidebar from '../components/layout/Sidebar.astro'
-import ProductCard from '../components/ProductCard.astro'
-import FiltrosCatalogo from '../components/FiltrosCatalogo.astro'
+import Layout from "../layouts/Layout.astro";
+import Hero from "../components/layout/Hero.astro";
+import Sidebar from "../components/layout/Sidebar.astro";
+import ProductCard from "../components/ProductCard.astro";
+import FiltrosCatalogo from "../components/FiltrosCatalogo.astro";
 
-import { graphqlRequest } from '../graphql/client'
+import { graphqlRequest } from "../graphql/client";
+
+import {
+    obtenerIdioma,
+    rutaLocalizada,
+    traducir
+} from "../i18n/utils";
+
+const idioma = obtenerIdioma(Astro.url.pathname);
+const t = (es: string, en: string) => traducir(idioma, es, en);
 
 interface Categoria {
-    id: number
-    nombre: string
-    imagenUrl?: string | null
+    id: number;
+    nombre: string;
+    imagenUrl?: string | null;
 }
 
 interface Producto {
-    id: number
-    nombre: string
-    precio: number
-    imagenUrl?: string | null
-    descripcion: string
+    id: number;
+    nombre: string;
+    precio: number;
+    imagenUrl?: string | null;
+    descripcion: string;
 }
 
 interface HomeData {
-    categorias: Categoria[]
-    products: Producto[]
+    categorias: Categoria[];
+    products: Producto[];
 }
 
 const QUERY_HOME = `
@@ -64,42 +73,40 @@ const QUERY_HOME = `
             descripcion
         }
     }
-`
+`;
 
-// Obtener los filtros de la URL
-const parametros = Astro.url.searchParams
+const parametros = Astro.url.searchParams;
 
 const texto = (nombre: string): string =>
-    parametros.get(nombre)?.trim() || ''
+    parametros.get(nombre)?.trim() || "";
 
 const numero = (nombre: string): number | null => {
-    const valor = texto(nombre)
+    const valor = texto(nombre);
 
-    if (!valor) return null
+    if (!valor) return null;
 
-    const resultado = Number(valor)
+    const resultado = Number(valor);
 
     return Number.isFinite(resultado) && resultado >= 0
         ? resultado
-        : null
-}
+        : null;
+};
 
 // Filtros seleccionados
-const buscar = texto('buscar')
-const precioMin = numero('precioMin')
-const precioMax = numero('precioMax')
-const material = texto('material')
-const piedra = texto('piedra')
-const color = texto('color')
-const orden = texto('orden')
-const disponible = parametros.get('disponible') === 'true'
+const buscar = texto("buscar");
+const precioMin = numero("precioMin");
+const precioMax = numero("precioMax");
+const material = texto("material");
+const piedra = texto("piedra");
+const color = texto("color");
+const orden = texto("orden");
+const disponible = parametros.get("disponible") === "true";
 
-// Datos del catalogo
-let categorias: Categoria[] = []
-let productos: Producto[] = []
-let error: string | null = null
+// Datos del catálogo
+let categorias: Categoria[] = [];
+let productos: Producto[] = [];
+let error: string | null = null;
 
-// Consultar productos con los filtros aplicados
 try {
     const data = await graphqlRequest<HomeData>(
         QUERY_HOME,
@@ -113,14 +120,18 @@ try {
             disponible: disponible ? true : null,
             orden: orden || null,
         }
-    )
+    );
 
-    categorias = data.categorias
-    productos = data.products
+    categorias = data.categorias;
+    productos = data.products;
 
 } catch (err) {
-    console.error('[Catalogo] Error:', err)
-    error = 'No se pudo cargar el catálogo.'
+    console.error("[Catalogo] Error:", err);
+
+    error = t(
+        "No se pudo cargar el catálogo.",
+        "Could not load the catalog."
+    );
 }
 ---
 
@@ -137,12 +148,14 @@ try {
             <h2>
                 {
                     buscar
-                        ? `Resultados para "${buscar}"`
-                        : 'Catálogo'
+                        ? t(
+                            `Resultados para "${buscar}"`,
+                            `Results for "${buscar}"`
+                        )
+                        : t("Catálogo", "Catalog")
                 }
             </h2>
 
-            <!-- Componente compartido de filtros -->
             <FiltrosCatalogo parametros={parametros} />
 
             {
@@ -155,16 +168,34 @@ try {
                 ) : productos.length === 0 ? (
 
                     <div class="sin-resultados">
-                        <h3>No se encontraron productos</h3>
+
+                        <h3>
+                            {
+                                t(
+                                    "No se encontraron productos",
+                                    "No products found"
+                                )
+                            }
+                        </h3>
 
                         <p>
-                            Intenta modificar los filtros
-                            o realizar otra búsqueda.
+                            {
+                                t(
+                                    "Intenta modificar los filtros o realizar otra búsqueda.",
+                                    "Try changing the filters or searching again."
+                                )
+                            }
                         </p>
 
-                        <a href="/">
-                            Ver todos los productos
+                        <a href={rutaLocalizada("/", idioma)}>
+                            {
+                                t(
+                                    "Ver todos los productos",
+                                    "View all products"
+                                )
+                            }
                         </a>
+
                     </div>
 
                 ) : (
@@ -198,26 +229,31 @@ try {
 <style>
     .content {
         display: flex;
+        flex-direction: column;
+        width: 100%;
+        max-width: var(--content-max-width);
+        margin-inline: auto;
     }
 
     main {
         flex: 1;
+        width: 100%;
         min-width: 0;
-        min-height: 80vh;
-        padding: 2rem;
+        min-height: 80dvh;
+        padding: var(--page-padding);
     }
 
     h2 {
         font-family: var(--font-heading);
         color: var(--color-purple);
         margin-top: 0;
+        overflow-wrap: anywhere;
     }
 
     .products {
         display: grid;
-        grid-template-columns:
-            repeat(auto-fill, minmax(200px, 1fr));
-        gap: 1.5rem;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 12px;
     }
 
     .error {
@@ -225,11 +261,12 @@ try {
     }
 
     .sin-resultados {
-        padding: 3rem 1.5rem;
+        padding: 2rem 1rem;
         text-align: center;
         background: #fffaf6;
         border: 1px solid #eadbc8;
         border-radius: 16px;
+        overflow-wrap: anywhere;
     }
 
     .sin-resultados h3 {
@@ -250,19 +287,38 @@ try {
         border-radius: 10px;
         text-decoration: none;
         font-weight: 600;
+        max-width: 100%;
     }
 
     .sin-resultados a:hover {
         background: #741052;
     }
 
-    @media (max-width: 600px) {
+    @media (min-width: 360px) {
+        .products {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
+    @media (min-width: 768px) {
         .content {
-            flex-direction: column;
+            flex-direction: row;
         }
 
-        main {
-            padding: 1rem;
+        .products {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 16px;
+        }
+
+        .sin-resultados {
+            padding: 3rem 1.5rem;
+        }
+    }
+
+    @media (min-width: 1200px) {
+        .products {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 24px;
         }
     }
 </style>

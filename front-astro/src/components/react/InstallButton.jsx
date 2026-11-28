@@ -1,36 +1,39 @@
 import { useEffect, useState } from "react";
+import { traducir } from "../../i18n/utils";
 
-/**
- * Botón propio para instalar la PWA (bono P3-2).
- * El evento beforeinstallprompt se captura en Layout.astro y se guarda en
- * window.__pwaPrompt; aquí solo se lee, así no se pierde si el componente
- * se vuelve a montar.
- */
-export default function InstallButton() {
+export default function InstallButton({ idioma = "es" }) {
   const [promptEvent, setPromptEvent] = useState(null);
   const [instalada, setInstalada] = useState(false);
 
   useEffect(() => {
-    // Ya se está ejecutando como app instalada
-    if (window.matchMedia("(display-mode: standalone)").matches) {
+    if (
+      window.matchMedia("(display-mode: standalone)").matches ||
+      navigator.standalone === true
+    ) {
       setInstalada(true);
       return;
     }
 
-    // Si el evento ya había llegado antes de montar el componente
-    if (window.__pwaPrompt) setPromptEvent(window.__pwaPrompt);
+    if (window.__pwaPrompt) {
+      setPromptEvent(window.__pwaPrompt);
+    }
 
-    const alPoderInstalar = () => setPromptEvent(window.__pwaPrompt);
+    const alPoderInstalar = () => {
+      setPromptEvent(window.__pwaPrompt);
+    };
+
     const alInstalar = () => {
       setInstalada(true);
       setPromptEvent(null);
     };
 
     window.addEventListener("pwa-prompt-ready", alPoderInstalar);
+
     window.addEventListener("pwa-installed", alInstalar);
 
     return () => {
       window.removeEventListener("pwa-prompt-ready", alPoderInstalar);
+
       window.removeEventListener("pwa-installed", alInstalar);
     };
   }, []);
@@ -38,11 +41,13 @@ export default function InstallButton() {
   async function instalar() {
     if (!promptEvent) return;
 
-    promptEvent.prompt(); // muestra el diálogo nativo de instalación
-    const { outcome } = await promptEvent.userChoice; // "accepted" | "dismissed"
+    promptEvent.prompt();
+
+    const { outcome } = await promptEvent.userChoice;
+
     console.log("[PWA] Resultado de la instalación:", outcome);
 
-    window.__pwaPrompt = null; // el evento solo se puede usar una vez
+    window.__pwaPrompt = null;
     setPromptEvent(null);
   }
 
@@ -55,17 +60,21 @@ export default function InstallButton() {
       style={{
         display: "flex",
         alignItems: "center",
+        justifyContent: "center",
         gap: "0.4rem",
-        padding: "0.5rem 1rem",
+        minHeight: "38px",
+        padding: "0.45rem 0.75rem",
         borderRadius: "999px",
         border: "1.5px solid var(--color-gold)",
         background: "transparent",
-        color: "var(--color-gold)",
-        fontSize: "0.95rem",
+        color: "#ffffff",
+        fontSize: "0.8rem",
         cursor: "pointer",
       }}
     >
-      ⬇ Instalar app
+      <span aria-hidden="true">⬇</span>
+
+      {traducir(idioma, "Instalar app", "Install app")}
     </button>
   );
 }

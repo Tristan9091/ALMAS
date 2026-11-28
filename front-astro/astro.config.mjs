@@ -4,6 +4,16 @@ import netlify from "@astrojs/netlify";
 import { AstroPWAIntegration } from "@vite-pwa/astro";
 
 export default defineConfig({
+  site: "https://almasjeweler.netlify.app",
+
+  i18n: {
+    defaultLocale: "es",
+    locales: ["es", "en"],
+    routing: {
+      prefixDefaultLocale: false,
+    },
+  },
+
   integrations: [
     react(),
     AstroPWAIntegration({
@@ -60,8 +70,9 @@ export default defineConfig({
               sameOrigin &&
               request.mode === "navigate" &&
               (url.pathname === "/" ||
-                /^\/categoria\/\d+\/?$/.test(url.pathname) ||
-                /^\/producto\/\d+\/?$/.test(url.pathname)),
+                /^\/en\/?$/.test(url.pathname) ||
+                /^(\/en)?\/categoria\/\d+\/?$/.test(url.pathname) ||
+                /^(\/en)?\/producto\/\d+\/?$/.test(url.pathname)),
 
             handler: "NetworkFirst",
             method: "GET",
